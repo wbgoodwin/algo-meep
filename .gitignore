@@ -49,3 +49,33 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+
+__pycache__/
+__pycache__/*
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.pytest_cache/
+.pytest_cache/*
+*.log
+*.log.*
+logs/
+logs/*
+cache/
+cache/*
+
+# CDK output
+cdk.out/
+cdk.context.json
+cdk.out/**/*
+
+*/build/
+*/dist/
+*/node_modules/
