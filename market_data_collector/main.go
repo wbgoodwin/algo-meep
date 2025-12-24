@@ -266,8 +266,8 @@ func handler(ctx context.Context, event json.RawMessage) (Response, error) {
 		})
 	}
 
-	var md *MarketData
-	return Response{Message: "Success", MarketData: *md}, nil
+	md := collectMarketData(input)
+	return Response{Message: "Success", MarketData: md}, nil
 }
 
 func main() {
