@@ -35,9 +35,9 @@ type Time struct {
 	Year   int `json:"year"`
 	Month  int `json:"month"`
 	Day    int `json:"day"`
-	Hour   int `hour:"hour,omitempty"`
-	Minute int `minute:"minute,omitempty"`
-	Second int `second:"second,omitempty"`
+	Hour   int `json:"hour,omitempty"`
+	Minute int `json:"minute,omitempty"`
+	Second int `json:"second,omitempty"`
 }
 
 type Input struct {
