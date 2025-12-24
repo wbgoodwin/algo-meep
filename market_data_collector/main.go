@@ -257,7 +257,7 @@ func handler(ctx context.Context, event json.RawMessage) (Response, error) {
 	if client == nil {
 		keys, err := GetApiKeys()
 		if err != nil {
-			return Response{Message: "Failed to get the API Keys from SS. M: " + err.Error()}, err
+			return Response{Message: "Failed to get the API Keys from SSM: " + err.Error()}, err
 		}
 		client = marketdata.NewClient(marketdata.ClientOpts{
 			APIKey:    keys.ApiKey,
