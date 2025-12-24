@@ -110,7 +110,7 @@ func barsToParquet(bars []marketdata.Bar, symbol string) ([]byte, error) {
 			Low:        bar.Low,
 			Close:      bar.Close,
 			Volume:     int64(bar.Volume),
-			TradeCount: 0, // Alpaca doesn't provide trade count in bar dat
+			TradeCount: 0, // Alpaca doesn't provide trade count in bar data
 			VWAP:       0, // Alpaca doesn't provide VWAP in bar data
 		}
 		if err := pw.Write(pb); err != nil {
