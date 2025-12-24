@@ -237,18 +237,6 @@ func collectMarketData(input Input) MarketData {
 	return MarketData{Bars: bars, NewsSentiment: sentiment}
 }
 
-func quotes() {
-	quotes, err := client.GetQuotes("AAPL", marketdata.GetQuotesRequest{
-		Start:      time.Date(2021, 8, 9, 13, 30, 0, 0, time.UTC),
-		TotalLimit: 30,
-	})
-	must(err)
-	fmt.Println("AAPL quotes:")
-	for _, quote := range quotes {
-		fmt.Printf("%+v\n", quote)
-	}
-}
-
 func handler(ctx context.Context, event json.RawMessage) (Response, error) {
 	var input Input
 	if err := json.Unmarshal(event, &input); err != nil {
