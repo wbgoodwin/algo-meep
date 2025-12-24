@@ -1,3 +1,22 @@
+# Environment variables with secrets
+.env
+
+# LocalStack data
+volume/
+localstack-backup/
+
+# Lambda binaries
+bootstrap
+*.zip
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
 # If you prefer the allow list template instead of the deny list, see community template:
 # https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
 #
