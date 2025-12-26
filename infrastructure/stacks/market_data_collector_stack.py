@@ -13,8 +13,10 @@ import os
 
 
 class MarketDataCollectorStack(Stack):
-    def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
+    def __init__(self, scope: Construct, construct_id: str, bootstrap_artifact=None, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
+        
+        self.bootstrap_artifact = bootstrap_artifact
 
         # Environment configuration for hot reload
         stage = os.getenv("STAGE", "dev")
@@ -148,10 +150,15 @@ class MarketDataCollectorStack(Stack):
 
     def _build_code_source(self):
         """
-        Use bootstrap.zip for all deployments.
+        Use bootstrap.zip from pipeline artifact if available, otherwise use local file.
         For hot reload, the gowatch script updates the Lambda function code directly.
         """
-        return _lambda.Code.from_asset("bootstrap.zip")
+        if self.bootstrap_artifact:
+            # Use the artifact from the pipeline
+            return _lambda.Code.from_asset(self.bootstrap_artifact)
+        else:
+            # Fallback to local file for local development
+            return _lambda.Code.from_asset("./infrastructure/bootstrap.zip")
 
 
 

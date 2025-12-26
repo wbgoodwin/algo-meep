@@ -2,27 +2,62 @@
 import os
 
 import aws_cdk as cdk
+from aws_cdk.pipelines import CodePipeline, CodePipelineSource, ShellStep, FileSetLocation, CodePipelineFileSet
 
 from stacks.market_data_collector_stack import MarketDataCollectorStack
+from constants import APP_NAME, DEFAULT_REGION, REPO_NAME, GH_CONNECTION_ARN, DEFAULT_ACCOUNT
 
 
 app = cdk.App()
-infra_stack = MarketDataCollectorStack(app, "MarketDataCollectorStack",
-    # If you don't specify 'env', this stack will be environment-agnostic.
-    # Account/Region-dependent features and context lookups will not work,
-    # but a single synthesized template can be deployed anywhere.
 
-    # Uncomment the next line to specialize this stack for the AWS Account
-    # and Region that are implied by the current CLI configuration.
+# Create a stack for the pipeline
+class PipelineStack(cdk.Stack):
+    def __init__(self, scope, id, **kwargs):
+        super().__init__(scope, id, **kwargs)
+        
+        # Create the pipeline
+        self.pipeline = CodePipeline(self, f"{APP_NAME}-Pipeline",
+            pipeline_name=f"{APP_NAME}-Pipeline",
+            synth=ShellStep("Synth",
+                input=CodePipelineSource.connection(REPO_NAME, "main", connection_arn=GH_CONNECTION_ARN),
+                commands=[
+                    "ls -a",
+                    # Build the Go application first
+                    "cd market_data_collector",
+                    "ls -a",
+                    "GOOS=linux GOARCH=arm64 go build -o bootstrap .",
+                    "cd ..",
+                    "zip -j market_data_collector/bootstrap.zip market_data_collector/bootstrap",
+                    "mv market_data_collector/bootstrap.zip infrastructure/cdk.out/",
+                    "ls -a",
+                    # Install dependencies and synthesize
+                    "npm install -g aws-cdk",
+                    "uv sync",
+                    "cdk synth"
+                ],
+                
+            )
+        )
 
-    env=cdk.Environment(account=os.getenv('CDK_DEFAULT_ACCOUNT'), region=os.getenv('CDK_DEFAULT_REGION', 'us-east-1')),
+# Create the pipeline stack
+pipeline_stack = PipelineStack(app, f"{APP_NAME}-PipelineStack",env=cdk.Environment(
+                account=DEFAULT_ACCOUNT,
+                region=DEFAULT_REGION
+            ))
 
-    # Uncomment the next line if you know exactly what Account and Region you
-    # want to deploy the stack to. */
+# Create the application stage
+class MarketDataCollectorStage(cdk.Stage):
+    def __init__(self, scope, id, bootstrap_output, **kwargs):
+        super().__init__(scope, id, **kwargs)
+        
+        # Deploy the market data collector stack with the build artifact
+        MarketDataCollectorStack(self, "MarketDataCollectorStack", bootstrap_artifact=bootstrap_output)
 
-    # For more information, see https://docs.aws.amazon.com/cdk/latest/guide/environments.html
-    )
 
-
+# Add the application stage to the pipeline
+pipeline_stack.pipeline.add_stage(
+    MarketDataCollectorStage(app, "MarketDataCollectorStage", None)
+)
 
 app.synth()
+
