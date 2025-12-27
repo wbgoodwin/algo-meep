@@ -158,7 +158,7 @@ class MarketDataCollectorStack(Stack):
             return _lambda.Code.from_asset(self.bootstrap_artifact)
         else:
             # Fallback to local file for local development
-            return _lambda.Code.from_asset("./infrastructure/bootstrap.zip")
+            return _lambda.Code.from_asset("./infrastructure/cdk.out/bootstrap.zip")
 
 
 

@@ -2,7 +2,9 @@
 import os
 
 import aws_cdk as cdk
-from aws_cdk.pipelines import CodePipeline, CodePipelineSource, ShellStep, FileSetLocation, CodePipelineFileSet
+from aws_cdk.pipelines import CodePipeline, CodePipelineSource, ShellStep
+from aws_cdk.aws_codebuild import LinuxArmBuildImage, ComputeType, BuildEnvironment
+from aws_cdk.aws_iam import Effect, PolicyStatement
 
 from stacks.market_data_collector_stack import MarketDataCollectorStack
 from constants import APP_NAME, DEFAULT_REGION, REPO_NAME, GH_CONNECTION_ARN, DEFAULT_ACCOUNT
@@ -22,20 +24,37 @@ class PipelineStack(cdk.Stack):
                 input=CodePipelineSource.connection(REPO_NAME, "main", connection_arn=GH_CONNECTION_ARN),
                 commands=[
                     "ls -a",
+                    "go version",
+                    "which go",
                     # Build the Go application first
                     "cd market_data_collector",
                     "ls -a",
                     "GOOS=linux GOARCH=arm64 go build -o bootstrap .",
                     "cd ..",
                     "zip -j market_data_collector/bootstrap.zip market_data_collector/bootstrap",
+                    "mkdir -p infrastructure/cdk.out",
+                    "ls -ld market_data_collector/bootstrap.zip",
+                    "ls -ld market_data_collector",
                     "mv market_data_collector/bootstrap.zip infrastructure/cdk.out/",
                     "ls -a",
-                    # Install dependencies and synthesize
-                    "npm install -g aws-cdk",
+                    'export PATH="$HOME/.local/bin:$PATH"',
+                    "source $HOME/.local/bin/env",
+                    "cd infrastructure",
                     "uv sync",
+                    "source .venv/bin/activate",
+                    "cd ..",
                     "cdk synth"
                 ],
-                
+            ),
+            code_build_defaults=cdk.pipelines.CodeBuildOptions(
+                build_environment=cdk.aws_codebuild.BuildEnvironment(
+                    build_image=LinuxArmBuildImage.from_ecr_repository(
+                        cdk.aws_ecr.Repository.from_repository_name(self, "BuildRepo", "algo-meep-build"),
+                        "latest"
+
+                    ),
+                    compute_type=ComputeType.SMALL,
+                ),
             )
         )
 
@@ -44,6 +63,7 @@ pipeline_stack = PipelineStack(app, f"{APP_NAME}-PipelineStack",env=cdk.Environm
                 account=DEFAULT_ACCOUNT,
                 region=DEFAULT_REGION
             ))
+
 
 # Create the application stage
 class MarketDataCollectorStage(cdk.Stage):
