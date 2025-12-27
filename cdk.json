@@ -1,5 +1,5 @@
 {
-  "app": "python3 infrastructure/app.py",
+  "app": "uv run infrastructure/app.py",
   "watch": {
     "include": [
       "**"
