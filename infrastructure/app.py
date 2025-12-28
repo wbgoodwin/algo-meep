@@ -23,20 +23,13 @@ class PipelineStack(cdk.Stack):
             synth=ShellStep("Synth",
                 input=CodePipelineSource.connection(REPO_NAME, "main", connection_arn=GH_CONNECTION_ARN),
                 commands=[
-                    "ls -a",
-                    "go version",
-                    "which go",
                     # Build the Go application first
                     "cd market_data_collector",
-                    "ls -a",
                     "GOOS=linux GOARCH=arm64 go build -o bootstrap .",
                     "cd ..",
                     "zip -j market_data_collector/bootstrap.zip market_data_collector/bootstrap",
                     "mkdir -p infrastructure/cdk.out",
-                    "ls -ld market_data_collector/bootstrap.zip",
-                    "ls -ld market_data_collector",
                     "mv market_data_collector/bootstrap.zip infrastructure/cdk.out/",
-                    "ls -a",
                     'export PATH="$HOME/.local/bin:$PATH"',
                     "source $HOME/.local/bin/env",
                     "cd infrastructure",
@@ -76,7 +69,7 @@ class MarketDataCollectorStage(cdk.Stage):
 
 # Add the application stage to the pipeline
 pipeline_stack.pipeline.add_stage(
-    MarketDataCollectorStage(app, "MarketDataCollectorStage", None)
+    MarketDataCollectorStage(pipeline_stack, "MarketDataCollectorStage", None)
 )
 
 app.synth()
