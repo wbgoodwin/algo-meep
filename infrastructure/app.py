@@ -26,6 +26,7 @@ class PipelineStack(cdk.Stack):
                     # Build the Go application first
                     "./market_data_collector/build_market_data_collector.sh",
                     "cd infrastructure",
+                    "source $HOME/.local/bin/env",
                     "uv sync",
                     "source .venv/bin/activate",
                     "cd ..",
