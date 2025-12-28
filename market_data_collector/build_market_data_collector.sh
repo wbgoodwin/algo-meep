@@ -14,8 +14,9 @@ echo "📁 Creating deployment package..."
 zip -j ./market_data_collector/bootstrap.zip ./market_data_collector/bootstrap
 
 # Move to infrastructure directory
-mv ./market_data_collector/bootstrap.zip ./infrastructure/
+mkdir -p ./infrastructure/cdk.out
+mv ./market_data_collector/bootstrap.zip ./infrastructure/cdk.out/
 
 echo "✅ Build complete!"
-echo "✅ Artifact created: infrastructure/bootstrap.zip"
+echo "✅ Artifact created: infrastructure/cdk.out/bootstrap.zip"
 echo "✅ Ready for deployment"
