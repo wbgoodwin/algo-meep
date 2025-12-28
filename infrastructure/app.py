@@ -24,6 +24,7 @@ class PipelineStack(cdk.Stack):
                 input=CodePipelineSource.connection(REPO_NAME, "main", connection_arn=GH_CONNECTION_ARN),
                 commands=[
                     # Build the Go application first
+                    "chmod +x market_data_collector/build_market_data_collector.sh",
                     "./market_data_collector/build_market_data_collector.sh",
                     "cd infrastructure",
                     "uv sync",
