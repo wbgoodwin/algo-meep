@@ -1,0 +1,31 @@
+FROM public.ecr.aws/docker/library/alpine:latest
+
+# Install Go 1.25.5 and build dependencies
+RUN apk update && \
+    apk add bash zip && \
+    apk add --no-cache tar gzip curl && \
+    curl -LO https://go.dev/dl/go1.25.5.linux-arm64.tar.gz && \
+    rm -rf /usr/local/go && \
+    tar -C /usr/local -xzf go1.25.5.linux-arm64.tar.gz && \
+    rm go1.25.5.linux-arm64.tar.gz
+
+# Set Go environment variables
+ENV PATH=$PATH:/usr/local/go/bin
+ENV GOCACHE=/tmp/go-cache
+ENV GOMODCACHE=/tmp/go-mod-cache
+
+# Install Node.js for CDK
+RUN apk add --no-cache nodejs npm
+RUN npm install -g aws-cdk
+
+# Install Python and uv
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+RUN source $HOME/.local/bin/env
+
+# Clean up build dependencies
+RUN apk del tar gzip curl
+
+# Create cache directories
+RUN mkdir -p /tmp/go-cache /tmp/go-mod-cache
+
+WORKDIR /tmp
