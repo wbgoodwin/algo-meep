@@ -24,14 +24,7 @@ class PipelineStack(cdk.Stack):
                 input=CodePipelineSource.connection(REPO_NAME, "main", connection_arn=GH_CONNECTION_ARN),
                 commands=[
                     # Build the Go application first
-                    "cd market_data_collector",
-                    "GOOS=linux GOARCH=arm64 go build -o bootstrap .",
-                    "cd ..",
-                    "zip -j market_data_collector/bootstrap.zip market_data_collector/bootstrap",
-                    "mkdir -p infrastructure/cdk.out",
-                    "mv market_data_collector/bootstrap.zip infrastructure/cdk.out/",
-                    'export PATH="$HOME/.local/bin:$PATH"',
-                    "source $HOME/.local/bin/env",
+                    "./market_data_collector/build_market_data_collector.sh",
                     "cd infrastructure",
                     "uv sync",
                     "source .venv/bin/activate",
