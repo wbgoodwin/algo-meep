@@ -51,7 +51,6 @@ func bars(input Input) ([]marketdata.Bar, error) {
 		TimeFrame: marketdata.OneDay,
 		Start:     time.Date(input.Start.Year, time.Month(input.Start.Month), input.Start.Day, input.Start.Hour, input.Start.Minute, input.Start.Second, 0, time.UTC),
 		End:       time.Date(input.End.Year, time.Month(input.End.Month), input.End.Day, input.End.Hour, input.End.Minute, input.End.Second, 0, time.UTC),
-		AsOf:      time.Now().Add(-30 * time.Hour).Format("2006-01-02"),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch bars for %s: %w", input.Symbol, err)

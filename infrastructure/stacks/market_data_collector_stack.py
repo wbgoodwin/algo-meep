@@ -18,10 +18,6 @@ class MarketDataCollectorStack(Stack):
         
         self.bootstrap_artifact = bootstrap_artifact
 
-        # Environment configuration for hot reload
-        stage = os.getenv("STAGE", "dev")
-        lambda_mount_cwd = os.getenv("LAMBDA_MOUNT_CWD", "")
-
         # S3 Bucket for market data storage
         market_data_bucket = s3.Bucket(
             self, "MarketDataBucket",
@@ -118,9 +114,6 @@ class MarketDataCollectorStack(Stack):
             memory_size=256,
             environment={
                 "S3_BUCKET": market_data_bucket.bucket_name,
-                "LOCALSTACK_ENDPOINT": "http://localhost:4566",
-                "ALPACA_API_KEY": "your-api-key-here",
-                "ALPACA_API_SECRET": "your-api-secret-here"
             },
             architecture=_lambda.Architecture.ARM_64,
             log_group=log_group,
@@ -159,5 +152,3 @@ class MarketDataCollectorStack(Stack):
         else:
             # Fallback to local file for local development
             return _lambda.Code.from_asset("./infrastructure/cdk.out/bootstrap.zip")
-
-
