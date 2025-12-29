@@ -38,23 +38,6 @@ func GetApiKeys() (*ApiKeys, error) {
 	var cfg aws.Config
 	var err error
 
-	// Check if running in LocalStack (using environment variable)
-	if endpoint := os.Getenv("LOCALSTACK_ENDPOINT"); endpoint != "" {
-		cfg, err = config.LoadDefaultConfig(context.TODO(),
-			config.WithRegion(region),
-		)
-		if err != nil {
-			return nil, err
-		}
-		// Create SSM client with custom endpoint
-		svc := ssm.NewFromConfig(cfg, func(o *ssm.Options) {
-			o.BaseEndpoint = &endpoint
-			o.Region = region
-		})
-
-		return getApiKeysFromSSM(svc)
-	}
-
 	// Production AWS configuration
 	cfg, err = config.LoadDefaultConfig(context.TODO(), config.WithRegion(region))
 	if err != nil {
