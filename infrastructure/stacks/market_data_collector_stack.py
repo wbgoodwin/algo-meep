@@ -13,7 +13,7 @@ import os
 
 
 class MarketDataCollectorStack(Stack):
-    def __init__(self, scope: Construct, construct_id: str, bootstrap_artifact=None, **kwargs) -> None:
+    def __init__(self, scope: Construct, construct_id: str, bootstrap_artifact=None, environment_variables=None, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
         
         self.bootstrap_artifact = bootstrap_artifact
@@ -102,6 +102,15 @@ class MarketDataCollectorStack(Stack):
             removal_policy=RemovalPolicy.DESTROY,
         )
 
+        # Build environment variables
+        env_vars = {
+            "S3_BUCKET": market_data_bucket.bucket_name,
+        }
+        
+        # Add optional environment variables if provided
+        if environment_variables:
+            env_vars.update(environment_variables)
+
         # Lambda function for market data collection
         market_data_lambda = _lambda.Function(
             self, "MarketDataCollectorFunction",
@@ -112,9 +121,7 @@ class MarketDataCollectorStack(Stack):
             role=lambda_role,
             timeout=Duration.minutes(15),
             memory_size=256,
-            environment={
-                "S3_BUCKET": market_data_bucket.bucket_name,
-            },
+            environment=env_vars,
             architecture=_lambda.Architecture.ARM_64,
             log_group=log_group,
         )
