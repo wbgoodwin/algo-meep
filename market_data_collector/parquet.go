@@ -44,16 +44,18 @@ func newsToParquet(news []marketdata.News, sentiment govader.Sentiment, symbol s
 	if err != nil {
 		return nil, err
 	}
+	analyzer := govader.NewSentimentIntensityAnalyzer()
 	for _, newsItem := range news {
+		itemSentiment := analyzer.PolarityScores(newsItem.Headline + " " + newsItem.Summary)
 		pn := ParquetNews{
 			Symbol:    symbol,
 			Timestamp: newsItem.CreatedAt.Unix(),
 			Headline:  newsItem.Headline,
 			Summary:   newsItem.Summary,
-			Positive:  sentiment.Positive,
-			Negative:  sentiment.Negative,
-			Neutral:   sentiment.Neutral,
-			Compound:  sentiment.Compound,
+			Positive:  itemSentiment.Positive,
+			Negative:  itemSentiment.Negative,
+			Neutral:   itemSentiment.Neutral,
+			Compound:  itemSentiment.Compound,
 		}
 		if err := pw.Write(pn); err != nil {
 			return nil, err
