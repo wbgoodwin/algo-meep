@@ -34,10 +34,10 @@ type Input struct {
 	End    Time   `json:"end"`
 }
 
-// ParquetBar is a struct for Parquet serialization
+// ParquetBar is a struct for Parquet serialization optimized for Athena/S3 tables
 type ParquetBar struct {
-	Symbol     string  `parquet:"name=symbol, type=BYTE_ARRAY, convertedtype=UTF8"`
-	Timestamp  int64   `parquet:"name=timestamp, type=INT64"`
+	Symbol     string  `parquet:"name=symbol, type=BYTE_ARRAY, convertedtype=UTF8, encoding=PLAIN_DICTIONARY"`
+	Timestamp  int64   `parquet:"name=timestamp, type=INT64, logicaltype=TIMESTAMP(MILLIS,true)"`
 	Open       float64 `parquet:"name=open, type=DOUBLE"`
 	High       float64 `parquet:"name=high, type=DOUBLE"`
 	Low        float64 `parquet:"name=low, type=DOUBLE"`
@@ -45,16 +45,18 @@ type ParquetBar struct {
 	Volume     int64   `parquet:"name=volume, type=INT64"`
 	TradeCount int64   `parquet:"name=trade_count, type=INT64"`
 	VWAP       float64 `parquet:"name=vwap, type=DOUBLE"`
+	Date       string  `parquet:"name=date, type=BYTE_ARRAY, convertedtype=UTF8, encoding=PLAIN_DICTIONARY"`
 }
 
-// ParquetNews is a struct for news sentiment data in Parquet
+// ParquetNews is a struct for news sentiment data in Parquet optimized for Athena/S3 tables
 type ParquetNews struct {
-	Symbol    string  `parquet:"name=symbol, type=BYTE_ARRAY, convertedtype=UTF8"`
-	Timestamp int64   `parquet:"name=timestamp, type=INT64"`
-	Headline  string  `parquet:"name=headline, type=BYTE_ARRAY, convertedtype=UTF8"`
-	Summary   string  `parquet:"name=summary, type=BYTE_ARRAY, convertedtype=UTF8"`
+	Symbol    string  `parquet:"name=symbol, type=BYTE_ARRAY, convertedtype=UTF8, encoding=PLAIN_DICTIONARY"`
+	Timestamp int64   `parquet:"name=timestamp, type=INT64, logicaltype=TIMESTAMP(MILLIS,true)"`
+	Headline  string  `parquet:"name=headline, type=BYTE_ARRAY, convertedtype=UTF8, encoding=PLAIN_DICTIONARY"`
+	Summary   string  `parquet:"name=summary, type=BYTE_ARRAY, convertedtype=UTF8, encoding=PLAIN_DICTIONARY"`
 	Positive  float64 `parquet:"name=positive, type=DOUBLE"`
 	Negative  float64 `parquet:"name=negative, type=DOUBLE"`
 	Neutral   float64 `parquet:"name=neutral, type=DOUBLE"`
 	Compound  float64 `parquet:"name=compound, type=DOUBLE"`
+	Date      string  `parquet:"name=date, type=BYTE_ARRAY, convertedtype=UTF8, encoding=PLAIN_DICTIONARY"`
 }

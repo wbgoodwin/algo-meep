@@ -7,6 +7,7 @@ from aws_cdk import (
     CfnOutput,
     Duration,
     aws_logs as _logs,
+    aws_s3tables_alpha as s3tables,
 )
 from constructs import Construct
 import os
@@ -47,6 +48,16 @@ class MarketDataCollectorStack(Stack):
                     ],
                 ),
             ],
+        )
+
+        s3tables.TableBucket( 
+            self, "MarketDataTableBucket",
+            bucket=market_data_bucket,
+            unreferenced_file_removal=s3tables.UnreferencedFileRemoval(
+                status="ENABLED",
+                # Set a file removal retention period in days
+                retention_period=Duration.days(7)
+            )
         )
 
         # IAM Role for Lambda function
