@@ -53,7 +53,6 @@ type ParquetNews struct {
 	Timestamp int64   `parquet:"name=timestamp, type=INT64"`
 	Headline  string  `parquet:"name=headline, type=STRING"`
 	Summary   string  `parquet:"name=summary, type=STRING"`
-	Sentiment float64 `parquet:"name=sentiment, type=DOUBLE"`
 	Positive  float64 `parquet:"name=positive, type=DOUBLE"`
 	Negative  float64 `parquet:"name=negative, type=DOUBLE"`
 	Neutral   float64 `parquet:"name=neutral, type=DOUBLE"`

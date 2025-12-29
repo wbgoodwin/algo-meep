@@ -50,7 +50,6 @@ func newsToParquet(news []marketdata.News, sentiment govader.Sentiment, symbol s
 			Timestamp: newsItem.CreatedAt.Unix(),
 			Headline:  newsItem.Headline,
 			Summary:   newsItem.Summary,
-			Sentiment: sentiment.Compound,
 			Positive:  sentiment.Positive,
 			Negative:  sentiment.Negative,
 			Neutral:   sentiment.Neutral,
