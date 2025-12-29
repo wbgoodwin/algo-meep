@@ -80,3 +80,6 @@ cdk.out/**/*
 */build/
 */dist/
 */node_modules/
+
+# Response file from test lambda
+response.json

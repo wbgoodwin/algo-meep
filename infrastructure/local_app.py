@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 import os
+from dotenv import load_dotenv
 
 import aws_cdk as cdk
 from stacks.market_data_collector_stack import MarketDataCollectorStack
+
+# Load environment variables from .env file
+load_dotenv()
 
 app = cdk.App()
 
