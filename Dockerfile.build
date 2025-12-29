@@ -20,7 +20,6 @@ RUN npm install -g aws-cdk
 
 # Install Python and uv
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH=$HOME/.local/bin:$PATH
 
 # Clean up build dependencies
 RUN apk del tar gzip curl

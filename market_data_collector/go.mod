@@ -3,7 +3,7 @@ module github.com/wbgoodwin/algo-meep/market_data_collector
 go 1.25.5
 
 require (
-	github.com/alpacahq/alpaca-trade-api-go/v3 v3.8.1
+	github.com/alpacahq/alpaca-trade-api-go/v3 v3.9.0
 	github.com/aws/aws-lambda-go v1.51.1
 	github.com/aws/aws-sdk-go-v2 v1.39.6
 	github.com/aws/aws-sdk-go-v2/config v1.31.6
@@ -14,7 +14,7 @@ require (
 )
 
 require (
-	cloud.google.com/go v0.121.5 // indirect
+	cloud.google.com/go v0.123.0 // indirect
 	github.com/apache/arrow/go/arrow v0.0.0-20200730104253-651201b0f516 // indirect
 	github.com/apache/thrift v0.14.2 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.3 // indirect
@@ -35,7 +35,7 @@ require (
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/klauspost/compress v1.15.9 // indirect
-	github.com/mailru/easyjson v0.9.0 // indirect
+	github.com/mailru/easyjson v0.9.1 // indirect
 	github.com/pierrec/lz4/v4 v4.1.8 // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/xitongsys/parquet-go-source v0.0.0-20241021075129-b732d2ac9c9b // indirect

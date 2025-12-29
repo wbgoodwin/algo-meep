@@ -46,26 +46,30 @@ type Input struct {
 	End    Time   `json:"end"`
 }
 
-func bars(input Input) []marketdata.Bar {
+func bars(input Input) ([]marketdata.Bar, error) {
 	bars, err := client.GetBars(input.Symbol, marketdata.GetBarsRequest{
 		TimeFrame: marketdata.OneDay,
 		Start:     time.Date(input.Start.Year, time.Month(input.Start.Month), input.Start.Day, input.Start.Hour, input.Start.Minute, input.Start.Second, 0, time.UTC),
 		End:       time.Date(input.End.Year, time.Month(input.End.Month), input.End.Day, input.End.Hour, input.End.Minute, input.End.Second, 0, time.UTC),
 		AsOf:      time.Now().Add(-30 * time.Hour).Format("2006-01-02"),
 	})
-	must(err)
-	return bars
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch bars for %s: %w", input.Symbol, err)
+	}
+	return bars, nil
 }
 
-func news(input Input) []marketdata.News {
+func news(input Input) ([]marketdata.News, error) {
 	news, err := client.GetNews(marketdata.GetNewsRequest{
 		Symbols:    []string{input.Symbol},
 		Start:      time.Date(input.Start.Year, time.Month(input.Start.Month), input.Start.Day, input.Start.Hour, input.Start.Minute, input.Start.Second, 0, time.UTC),
 		End:        time.Date(input.End.Year, time.Month(input.End.Month), input.End.Day, input.End.Hour, input.End.Minute, input.End.Second, 0, time.UTC),
 		TotalLimit: 2,
 	})
-	must(err)
-	return news
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch news for %s: %w", input.Symbol, err)
+	}
+	return news, nil
 }
 
 // ParquetBar is a struct for Parquet serialization
@@ -188,9 +192,16 @@ func uploadToS3(data []byte, key string) error {
 	return err
 }
 
-func collectMarketData(input Input) MarketData {
-	bars := bars(input)
-	news := news(input)
+func collectMarketData(input Input) (MarketData, error) {
+	bars, err := bars(input)
+	if err != nil {
+		return MarketData{}, fmt.Errorf("bars API call failed: %w", err)
+	}
+
+	news, err := news(input)
+	if err != nil {
+		return MarketData{}, fmt.Errorf("news API call failed: %w", err)
+	}
 
 	analyzer = govader.NewSentimentIntensityAnalyzer()
 	var sentiment govader.Sentiment
@@ -234,7 +245,7 @@ func collectMarketData(input Input) MarketData {
 		}
 	}
 
-	return MarketData{Bars: bars, NewsSentiment: sentiment}
+	return MarketData{Bars: bars, NewsSentiment: sentiment}, nil
 }
 
 func handler(ctx context.Context, event json.RawMessage) (Response, error) {
@@ -250,20 +261,17 @@ func handler(ctx context.Context, event json.RawMessage) (Response, error) {
 		client = marketdata.NewClient(marketdata.ClientOpts{
 			APIKey:    keys.ApiKey,
 			APISecret: keys.ApiSecret,
-			BaseURL:   "https://paper-api.alpaca.markets/v2",
+			BaseURL:   "https://data.alpaca.markets",
 		})
 	}
 
-	md := collectMarketData(input)
+	md, err := collectMarketData(input)
+	if err != nil {
+		return Response{Message: "Failed to collect market data: " + err.Error()}, err
+	}
 	return Response{Message: "Success", MarketData: md}, nil
 }
 
 func main() {
 	lambda.Start(handler)
-}
-
-func must(err error) {
-	if err != nil {
-		panic(err)
-	}
 }

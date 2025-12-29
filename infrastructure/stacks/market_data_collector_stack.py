@@ -153,14 +153,11 @@ class MarketDataCollectorStack(Stack):
         Use bootstrap.zip from pipeline artifact if available, otherwise use local file.
         For hot reload, the gowatch script updates the Lambda function code directly.
         """
-        if self.bootstrap_artifact:
+        if os.getenv("ENVIRONMENT") == "local":
             # Use the artifact from the pipeline
-            return _lambda.Code.from_asset(self.bootstrap_artifact)
+            return _lambda.Code.from_asset("../market_data_collector/build/bootstrap.zip")
         else:
             # Fallback to local file for local development
             return _lambda.Code.from_asset("./infrastructure/cdk.out/bootstrap.zip")
-
-
-
 
 
