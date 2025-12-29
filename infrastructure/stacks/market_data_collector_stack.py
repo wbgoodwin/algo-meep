@@ -53,11 +53,6 @@ class MarketDataCollectorStack(Stack):
         s3tables.TableBucket( 
             self, "MarketDataTableBucket",
             bucket=market_data_bucket,
-            unreferenced_file_removal=s3tables.UnreferencedFileRemoval(
-                status="ENABLED",
-                # Set a file removal retention period in days
-                retention_period=Duration.days(7)
-            )
         )
 
         # IAM Role for Lambda function
