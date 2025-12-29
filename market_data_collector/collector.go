@@ -23,7 +23,9 @@ func collectMarketData(input Input) (MarketData, error) {
 		return MarketData{}, fmt.Errorf("news API call failed: %w", err)
 	}
 
-	analyzer = govader.NewSentimentIntensityAnalyzer()
+	if analyzer == nil {
+		analyzer = govader.NewSentimentIntensityAnalyzer()
+	}
 	var sentiment govader.Sentiment
 	if len(news) == 0 {
 		sentiment = analyzer.PolarityScores("No news available")
