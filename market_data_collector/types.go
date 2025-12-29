@@ -36,7 +36,7 @@ type Input struct {
 
 // ParquetBar is a struct for Parquet serialization
 type ParquetBar struct {
-	Symbol     string  `parquet:"name=symbol, type=STRING"`
+	Symbol     string  `parquet:"name=symbol, type=BYTE_ARRAY, convertedtype=UTF8"`
 	Timestamp  int64   `parquet:"name=timestamp, type=INT64"`
 	Open       float64 `parquet:"name=open, type=DOUBLE"`
 	High       float64 `parquet:"name=high, type=DOUBLE"`
@@ -49,10 +49,10 @@ type ParquetBar struct {
 
 // ParquetNews is a struct for news sentiment data in Parquet
 type ParquetNews struct {
-	Symbol    string  `parquet:"name=symbol, type=STRING"`
+	Symbol    string  `parquet:"name=symbol, type=BYTE_ARRAY, convertedtype=UTF8"`
 	Timestamp int64   `parquet:"name=timestamp, type=INT64"`
-	Headline  string  `parquet:"name=headline, type=STRING"`
-	Summary   string  `parquet:"name=summary, type=STRING"`
+	Headline  string  `parquet:"name=headline, type=BYTE_ARRAY, convertedtype=UTF8"`
+	Summary   string  `parquet:"name=summary, type=BYTE_ARRAY, convertedtype=UTF8"`
 	Positive  float64 `parquet:"name=positive, type=DOUBLE"`
 	Negative  float64 `parquet:"name=negative, type=DOUBLE"`
 	Neutral   float64 `parquet:"name=neutral, type=DOUBLE"`
