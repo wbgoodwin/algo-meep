@@ -52,7 +52,7 @@ class MarketDataCollectorStack(Stack):
 
         s3tables.TableBucket( 
             self, "MarketDataTableBucket",
-            bucket=market_data_bucket,
+            table_bucket_name=market_data_bucket.bucket_name,
         )
 
         # IAM Role for Lambda function
