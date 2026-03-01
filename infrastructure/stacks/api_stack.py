@@ -23,6 +23,7 @@ class ApiStack(Stack):
         sync_table_arn: str,
         usage_table_arn: str,
         sync_bucket_arn: str,
+        token_encryption_key_arn: str,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -93,15 +94,14 @@ class ApiStack(Stack):
                                 f"arn:aws:ssm:{self.region}:{self.account}:parameter/algoflow/*"
                             ],
                         ),
-                        # KMS — for future access token encryption
+                        # KMS — access token encryption
                         iam.PolicyStatement(
                             effect=iam.Effect.ALLOW,
                             actions=[
                                 "kms:Encrypt",
                                 "kms:Decrypt",
-                                "kms:GenerateDataKey",
                             ],
-                            resources=["*"],  # Scoped to specific key in Phase 2
+                            resources=[token_encryption_key_arn],
                         ),
                         # Cognito — user management
                         iam.PolicyStatement(
@@ -134,6 +134,7 @@ class ApiStack(Stack):
                 "COGNITO_USER_POOL_ID": user_pool.user_pool_id,
                 "COGNITO_CLIENT_ID": user_pool_client.user_pool_client_id,
                 "TELLER_ENV": "sandbox",
+                "KMS_KEY_ARN": token_encryption_key_arn,
                 "ALLOWED_IPS": "141.152.50.56",  # IP allowlist (comma-separated)
                 # TELLER_API_KEY, TELLER_CERT_PEM, TELLER_KEY_PEM loaded from SSM at runtime
             },

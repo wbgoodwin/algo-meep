@@ -13,8 +13,10 @@ import (
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/kms"
 
 	"github.com/wbgoodwin/algo-meep/backend/internal/auth"
+	"github.com/wbgoodwin/algo-meep/backend/internal/crypto"
 	"github.com/wbgoodwin/algo-meep/backend/internal/middleware"
 	"github.com/wbgoodwin/algo-meep/backend/internal/provider"
 	"github.com/wbgoodwin/algo-meep/backend/internal/user"
@@ -23,11 +25,12 @@ import (
 
 // App holds all injectable dependencies for the API handler.
 type App struct {
-	Log         *middleware.Logger
-	AuthService *auth.Service
-	UserService *user.Service
-	ProviderReg *provider.Registry
-	AllowedIPs  map[string]bool
+	Log            *middleware.Logger
+	AuthService    *auth.Service
+	UserService    *user.Service
+	ProviderReg    *provider.Registry
+	AllowedIPs     map[string]bool
+	TokenEncryptor *crypto.TokenEncryptor
 }
 
 var app *App
@@ -85,12 +88,22 @@ func init() {
 		}
 	}
 
+	// Token encryption (KMS)
+	var tokenEnc *crypto.TokenEncryptor
+	if kmsKeyARN := os.Getenv("KMS_KEY_ARN"); kmsKeyARN != "" {
+		tokenEnc = crypto.NewTokenEncryptor(kms.NewFromConfig(awsCfg), kmsKeyARN)
+		logger.Info("KMS token encryption initialized")
+	} else {
+		logger.Warn("KMS_KEY_ARN not set — token encryption disabled (must be set in production)")
+	}
+
 	app = &App{
-		Log:         logger,
-		AuthService: authSvc,
-		UserService: userSvc,
-		ProviderReg: providerReg,
-		AllowedIPs:  allowedIPs,
+		Log:            logger,
+		AuthService:    authSvc,
+		UserService:    userSvc,
+		ProviderReg:    providerReg,
+		AllowedIPs:     allowedIPs,
+		TokenEncryptor: tokenEnc,
 	}
 
 	logger.Info("API Lambda initialized",
@@ -408,19 +421,28 @@ func (a *App) handleBankExchangeToken(ctx context.Context, req events.APIGateway
 		return api.NewProviderError("token exchange failed", err).ToAPIResponse()
 	}
 
-	// TODO: Encrypt access token with KMS before returning to client
-	// For now, return as-is (Phase 2: Security)
+	if a.TokenEncryptor == nil {
+		a.Log.Error("Token encryption not configured", fmt.Errorf("KMS_KEY_ARN not set"), middleware.WithUserID(userID))
+		return api.NewInternal("token encryption not configured", fmt.Errorf("KMS_KEY_ARN not set")).ToAPIResponse()
+	}
+
+	encryptedToken, err := a.TokenEncryptor.Encrypt(ctx, credential.AccessToken)
+	if err != nil {
+		a.Log.Error("Failed to encrypt access token", err, middleware.WithUserID(userID))
+		return api.NewInternal("failed to secure access token", err).ToAPIResponse()
+	}
+
 	_ = a.UserService.IncrementConnectedAccounts(ctx, userID, 1)
 
 	resp, _ := api.SuccessJSON(api.ExchangeTokenResponse{
-		EncryptedAccessToken: credential.AccessToken,
+		EncryptedAccessToken: encryptedToken,
 		InstitutionID:        credential.InstitutionID,
 		Provider:             credential.ProviderName,
 	})
 	return http.StatusOK, resp
 }
 
-func (a *App) handleBankAccounts(_ context.Context, req events.APIGatewayV2HTTPRequest, userID string) (int, []byte) {
+func (a *App) handleBankAccounts(ctx context.Context, req events.APIGatewayV2HTTPRequest, userID string) (int, []byte) {
 	var input api.AccountsRequest
 	if err := json.Unmarshal([]byte(req.Body), &input); err != nil {
 		// Try query params for GET
@@ -433,10 +455,20 @@ func (a *App) handleBankAccounts(_ context.Context, req events.APIGatewayV2HTTPR
 		return api.NewBadRequest("unknown provider").ToAPIResponse()
 	}
 
-	// TODO: Decrypt access token with KMS (Phase 2)
+	if a.TokenEncryptor == nil {
+		a.Log.Error("Token encryption not configured", fmt.Errorf("KMS_KEY_ARN not set"), middleware.WithUserID(userID))
+		return api.NewInternal("token encryption not configured", fmt.Errorf("KMS_KEY_ARN not set")).ToAPIResponse()
+	}
+
+	plainToken, err := a.TokenEncryptor.Decrypt(ctx, input.EncryptedAccessToken)
+	if err != nil {
+		a.Log.Error("Failed to decrypt access token", err, middleware.WithUserID(userID))
+		return api.NewBadRequest("invalid or corrupted access token").ToAPIResponse()
+	}
+
 	credential := provider.AccessCredential{
 		ProviderName: input.Provider,
-		AccessToken:  input.EncryptedAccessToken,
+		AccessToken:  plainToken,
 	}
 
 	accounts, err := p.GetAccounts(credential)
@@ -465,7 +497,7 @@ func (a *App) handleBankAccounts(_ context.Context, req events.APIGatewayV2HTTPR
 	return http.StatusOK, resp
 }
 
-func (a *App) handleBankSyncTransactions(_ context.Context, req events.APIGatewayV2HTTPRequest, userID string) (int, []byte) {
+func (a *App) handleBankSyncTransactions(ctx context.Context, req events.APIGatewayV2HTTPRequest, userID string) (int, []byte) {
 	var input api.SyncTransactionsRequest
 	if err := json.Unmarshal([]byte(req.Body), &input); err != nil {
 		return api.NewBadRequest("invalid request body").ToAPIResponse()
@@ -476,10 +508,20 @@ func (a *App) handleBankSyncTransactions(_ context.Context, req events.APIGatewa
 		return api.NewBadRequest("unknown provider").ToAPIResponse()
 	}
 
-	// TODO: Decrypt access token with KMS (Phase 2)
+	if a.TokenEncryptor == nil {
+		a.Log.Error("Token encryption not configured", fmt.Errorf("KMS_KEY_ARN not set"), middleware.WithUserID(userID))
+		return api.NewInternal("token encryption not configured", fmt.Errorf("KMS_KEY_ARN not set")).ToAPIResponse()
+	}
+
+	plainToken, err := a.TokenEncryptor.Decrypt(ctx, input.EncryptedAccessToken)
+	if err != nil {
+		a.Log.Error("Failed to decrypt access token", err, middleware.WithUserID(userID))
+		return api.NewBadRequest("invalid or corrupted access token").ToAPIResponse()
+	}
+
 	credential := provider.AccessCredential{
 		ProviderName: input.Provider,
-		AccessToken:  input.EncryptedAccessToken,
+		AccessToken:  plainToken,
 	}
 
 	sync, err := p.SyncTransactions(credential, input.Cursor)

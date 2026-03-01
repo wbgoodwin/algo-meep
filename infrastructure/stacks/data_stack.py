@@ -3,6 +3,7 @@ from aws_cdk import (
     CfnOutput,
     RemovalPolicy,
     aws_dynamodb as dynamodb,
+    aws_kms as kms,
     aws_s3 as s3,
     Duration,
 )
@@ -60,6 +61,16 @@ class DataStack(Stack):
             removal_policy=RemovalPolicy.DESTROY,  # Usage data is regenerable
         )
 
+        # --- KMS Key for access token encryption ---
+
+        self.token_encryption_key = kms.Key(
+            self, "TokenEncryptionKey",
+            alias="algoflow/token-encryption",
+            description="Encrypts bank provider access tokens in transit",
+            enable_key_rotation=True,
+            removal_policy=RemovalPolicy.RETAIN,
+        )
+
         # --- S3 Bucket for encrypted sync blobs ---
 
         self.sync_bucket = s3.Bucket(
@@ -96,3 +107,5 @@ class DataStack(Stack):
                   export_name="AlgoFlowSyncBucketName")
         CfnOutput(self, "SyncBucketArn", value=self.sync_bucket.bucket_arn,
                   export_name="AlgoFlowSyncBucketArn")
+        CfnOutput(self, "TokenEncryptionKeyArn", value=self.token_encryption_key.key_arn,
+                  export_name="AlgoFlowTokenEncryptionKeyArn")

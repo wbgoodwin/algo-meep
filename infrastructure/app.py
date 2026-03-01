@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import aws_cdk as cdk
 
-from stacks.market_data_collector_stack import MarketDataCollectorStack
 from stacks.auth_stack import AuthStack
 from stacks.data_stack import DataStack
 from stacks.api_stack import ApiStack
@@ -28,6 +27,7 @@ ApiStack(
     sync_table_arn=data_stack.sync_table.table_arn,
     usage_table_arn=data_stack.usage_table.table_arn,
     sync_bucket_arn=data_stack.sync_bucket.bucket_arn,
+    token_encryption_key_arn=data_stack.token_encryption_key.key_arn,
     env=env,
 )
 

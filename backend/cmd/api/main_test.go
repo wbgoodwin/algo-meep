@@ -15,7 +15,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	dbtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 
+	"github.com/aws/aws-sdk-go-v2/service/kms"
+
 	"github.com/wbgoodwin/algo-meep/backend/internal/auth"
+	"github.com/wbgoodwin/algo-meep/backend/internal/crypto"
 	"github.com/wbgoodwin/algo-meep/backend/internal/middleware"
 	"github.com/wbgoodwin/algo-meep/backend/internal/provider"
 	"github.com/wbgoodwin/algo-meep/backend/internal/user"
@@ -92,6 +95,29 @@ func (m *mockDynamo) DeleteItem(ctx context.Context, params *dynamodb.DeleteItem
 	return &dynamodb.DeleteItemOutput{}, nil
 }
 
+// --- Mock KMS ---
+
+type mockKMS struct {
+	encryptFn func(ctx context.Context, params *kms.EncryptInput, optFns ...func(*kms.Options)) (*kms.EncryptOutput, error)
+	decryptFn func(ctx context.Context, params *kms.DecryptInput, optFns ...func(*kms.Options)) (*kms.DecryptOutput, error)
+}
+
+func (m *mockKMS) Encrypt(ctx context.Context, params *kms.EncryptInput, optFns ...func(*kms.Options)) (*kms.EncryptOutput, error) {
+	if m.encryptFn != nil {
+		return m.encryptFn(ctx, params, optFns...)
+	}
+	// Passthrough: return plaintext as "ciphertext" (tests use base64 encoding)
+	return &kms.EncryptOutput{CiphertextBlob: params.Plaintext}, nil
+}
+
+func (m *mockKMS) Decrypt(ctx context.Context, params *kms.DecryptInput, optFns ...func(*kms.Options)) (*kms.DecryptOutput, error) {
+	if m.decryptFn != nil {
+		return m.decryptFn(ctx, params, optFns...)
+	}
+	// Passthrough: return ciphertext as plaintext
+	return &kms.DecryptOutput{Plaintext: params.CiphertextBlob}, nil
+}
+
 // --- Mock Bank Provider ---
 
 type mockBankProvider struct {
@@ -166,12 +192,18 @@ func newTestAppWithMocks(cognito *mockCognito, dynamo *mockDynamo) *App {
 	reg.Register(&mockBankProvider{name: "teller"})
 
 	return &App{
-		Log:         middleware.NewLogger("TEST"),
-		AuthService: auth.NewServiceWithClient(cognito, "test-pool", "test-client"),
-		UserService: user.NewServiceWithClient(dynamo),
-		ProviderReg: reg,
-		AllowedIPs:  map[string]bool{},
+		Log:            middleware.NewLogger("TEST"),
+		AuthService:    auth.NewServiceWithClient(cognito, "test-pool", "test-client"),
+		UserService:    user.NewServiceWithClient(dynamo),
+		ProviderReg:    reg,
+		AllowedIPs:     map[string]bool{},
+		TokenEncryptor: crypto.NewTokenEncryptor(&mockKMS{}, "test-key"),
 	}
+}
+
+// testEncryptToken encrypts a token using the mock KMS passthrough for use in test requests.
+func testEncryptToken(plaintext string) string {
+	return base64.StdEncoding.EncodeToString([]byte(plaintext))
 }
 
 func newTestAppWithIP(allowedIPs map[string]bool) *App {
@@ -870,7 +902,7 @@ func TestHandler_BankExchangeToken_ProviderError(t *testing.T) {
 func TestHandler_BankAccounts_Success(t *testing.T) {
 	a := newTestApp()
 	req := makeAuthRequest("GET /bank/accounts", "")
-	req.QueryStringParameters = map[string]string{"access_token": "tok", "provider": "teller"}
+	req.QueryStringParameters = map[string]string{"access_token": testEncryptToken("tok"), "provider": "teller"}
 	resp, _ := a.Handler(context.Background(), req)
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected 200, got %d: %s", resp.StatusCode, resp.Body)
@@ -880,7 +912,7 @@ func TestHandler_BankAccounts_Success(t *testing.T) {
 func TestHandler_BankAccounts_UnknownProvider(t *testing.T) {
 	a := newTestApp()
 	req := makeAuthRequest("GET /bank/accounts", "")
-	req.QueryStringParameters = map[string]string{"access_token": "tok", "provider": "unknown"}
+	req.QueryStringParameters = map[string]string{"access_token": testEncryptToken("tok"), "provider": "unknown"}
 	resp, _ := a.Handler(context.Background(), req)
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("expected 400, got %d", resp.StatusCode)
@@ -898,7 +930,7 @@ func TestHandler_BankAccounts_ProviderError(t *testing.T) {
 	a := newTestApp()
 	a.ProviderReg = reg
 	req := makeAuthRequest("GET /bank/accounts", "")
-	req.QueryStringParameters = map[string]string{"access_token": "tok", "provider": "teller"}
+	req.QueryStringParameters = map[string]string{"access_token": testEncryptToken("tok"), "provider": "teller"}
 	resp, _ := a.Handler(context.Background(), req)
 	if resp.StatusCode != http.StatusBadGateway {
 		t.Errorf("expected 502, got %d", resp.StatusCode)
@@ -907,7 +939,7 @@ func TestHandler_BankAccounts_ProviderError(t *testing.T) {
 
 func TestHandler_BankAccounts_BodyParsing(t *testing.T) {
 	a := newTestApp()
-	body := `{"encrypted_access_token":"tok","provider":"teller"}`
+	body := fmt.Sprintf(`{"encrypted_access_token":"%s","provider":"teller"}`, testEncryptToken("tok"))
 	resp, _ := a.Handler(context.Background(), makeAuthRequest("GET /bank/accounts", body))
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected 200, got %d: %s", resp.StatusCode, resp.Body)
@@ -918,7 +950,7 @@ func TestHandler_BankAccounts_BodyParsing(t *testing.T) {
 
 func TestHandler_BankSyncTransactions_Success(t *testing.T) {
 	a := newTestApp()
-	body := `{"encrypted_access_token":"tok","provider":"teller"}`
+	body := fmt.Sprintf(`{"encrypted_access_token":"%s","provider":"teller"}`, testEncryptToken("tok"))
 	resp, _ := a.Handler(context.Background(), makeAuthRequest("POST /bank/sync-transactions", body))
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected 200, got %d: %s", resp.StatusCode, resp.Body)
@@ -935,7 +967,7 @@ func TestHandler_BankSyncTransactions_InvalidBody(t *testing.T) {
 
 func TestHandler_BankSyncTransactions_UnknownProvider(t *testing.T) {
 	a := newTestApp()
-	body := `{"encrypted_access_token":"tok","provider":"unknown"}`
+	body := fmt.Sprintf(`{"encrypted_access_token":"%s","provider":"unknown"}`, testEncryptToken("tok"))
 	resp, _ := a.Handler(context.Background(), makeAuthRequest("POST /bank/sync-transactions", body))
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("expected 400, got %d", resp.StatusCode)
@@ -952,7 +984,7 @@ func TestHandler_BankSyncTransactions_ProviderError(t *testing.T) {
 	})
 	a := newTestApp()
 	a.ProviderReg = reg
-	body := `{"encrypted_access_token":"tok","provider":"teller"}`
+	body := fmt.Sprintf(`{"encrypted_access_token":"%s","provider":"teller"}`, testEncryptToken("tok"))
 	resp, _ := a.Handler(context.Background(), makeAuthRequest("POST /bank/sync-transactions", body))
 	if resp.StatusCode != http.StatusBadGateway {
 		t.Errorf("expected 502, got %d", resp.StatusCode)
@@ -974,7 +1006,7 @@ func TestHandler_BankSyncTransactions_WithUpdated(t *testing.T) {
 	})
 	a := newTestApp()
 	a.ProviderReg = reg
-	body := `{"encrypted_access_token":"tok","provider":"teller","cursor":"cursor_1"}`
+	body := fmt.Sprintf(`{"encrypted_access_token":"%s","provider":"teller","cursor":"cursor_1"}`, testEncryptToken("tok"))
 	resp, _ := a.Handler(context.Background(), makeAuthRequest("POST /bank/sync-transactions", body))
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected 200, got %d: %s", resp.StatusCode, resp.Body)
@@ -1090,6 +1122,81 @@ func TestHandler_Login_GetUserError_StillCreates(t *testing.T) {
 }
 
 // --- Content-Type header ---
+
+// --- KMS Encryption/Decryption Error Paths ---
+
+func TestHandler_BankExchangeToken_KMSEncryptError(t *testing.T) {
+	a := newTestApp()
+	a.TokenEncryptor = crypto.NewTokenEncryptor(&mockKMS{
+		encryptFn: func(ctx context.Context, params *kms.EncryptInput, optFns ...func(*kms.Options)) (*kms.EncryptOutput, error) {
+			return nil, fmt.Errorf("kms unavailable")
+		},
+	}, "test-key")
+	body := `{"enrollment_token":"tok_abc","provider":"teller"}`
+	resp, _ := a.Handler(context.Background(), makeAuthRequest("POST /bank/exchange-token", body))
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("expected 500 on KMS encrypt failure, got %d: %s", resp.StatusCode, resp.Body)
+	}
+}
+
+func TestHandler_BankAccounts_KMSDecryptError(t *testing.T) {
+	a := newTestApp()
+	a.TokenEncryptor = crypto.NewTokenEncryptor(&mockKMS{
+		decryptFn: func(ctx context.Context, params *kms.DecryptInput, optFns ...func(*kms.Options)) (*kms.DecryptOutput, error) {
+			return nil, fmt.Errorf("access denied")
+		},
+	}, "test-key")
+	req := makeAuthRequest("GET /bank/accounts", "")
+	req.QueryStringParameters = map[string]string{"access_token": testEncryptToken("tok"), "provider": "teller"}
+	resp, _ := a.Handler(context.Background(), req)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 on KMS decrypt failure, got %d: %s", resp.StatusCode, resp.Body)
+	}
+}
+
+func TestHandler_BankSyncTransactions_KMSDecryptError(t *testing.T) {
+	a := newTestApp()
+	a.TokenEncryptor = crypto.NewTokenEncryptor(&mockKMS{
+		decryptFn: func(ctx context.Context, params *kms.DecryptInput, optFns ...func(*kms.Options)) (*kms.DecryptOutput, error) {
+			return nil, fmt.Errorf("access denied")
+		},
+	}, "test-key")
+	body := fmt.Sprintf(`{"encrypted_access_token":"%s","provider":"teller"}`, testEncryptToken("tok"))
+	resp, _ := a.Handler(context.Background(), makeAuthRequest("POST /bank/sync-transactions", body))
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 on KMS decrypt failure, got %d: %s", resp.StatusCode, resp.Body)
+	}
+}
+
+func TestHandler_BankExchangeToken_VerifiesEncryption(t *testing.T) {
+	a := newTestApp()
+	body := `{"enrollment_token":"tok_abc","provider":"teller"}`
+	resp, _ := a.Handler(context.Background(), makeAuthRequest("POST /bank/exchange-token", body))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, resp.Body)
+	}
+
+	// Parse response and verify the token is base64-encoded (encrypted)
+	parsed := parseResponse(t, resp)
+	if !parsed.Success {
+		t.Fatal("expected success=true")
+	}
+	var exchangeResp api.ExchangeTokenResponse
+	dataBytes, _ := json.Marshal(parsed.Data)
+	if err := json.Unmarshal(dataBytes, &exchangeResp); err != nil {
+		t.Fatalf("failed to parse exchange response: %v", err)
+	}
+
+	// The encrypted token should be base64-encoded, not the raw access token
+	if exchangeResp.EncryptedAccessToken == "access_tok_abc" {
+		t.Error("access token should be encrypted (base64-encoded), not plaintext")
+	}
+	// Verify we can decode it as base64
+	_, err := base64.StdEncoding.DecodeString(exchangeResp.EncryptedAccessToken)
+	if err != nil {
+		t.Errorf("encrypted token should be valid base64: %v", err)
+	}
+}
 
 func TestHandler_ResponseContentType(t *testing.T) {
 	a := newTestApp()
