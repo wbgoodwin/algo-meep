@@ -200,10 +200,7 @@ func (t *TellerProvider) GetInstitutions() ([]Institution, error) {
 
 	institutions := make([]Institution, len(tellerInsts))
 	for i, ti := range tellerInsts {
-		institutions[i] = Institution{
-			ID:   ti.ID,
-			Name: ti.Name,
-		}
+		institutions[i] = Institution(ti)
 	}
 	return institutions, nil
 }
