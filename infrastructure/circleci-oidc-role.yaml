@@ -1,0 +1,167 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  One-time setup: IAM OIDC identity provider and deploy role for CircleCI.
+  Deploy with:
+    aws cloudformation deploy \
+      --template-file circleci-oidc-role.yaml \
+      --stack-name circleci-oidc-role \
+      --capabilities CAPABILITY_NAMED_IAM \
+      --parameter-overrides CircleCIOrgId=<your-circleci-org-id>
+
+Parameters:
+  CircleCIOrgId:
+    Type: String
+    Description: >
+      Your CircleCI organization ID. Find it in CircleCI web app under
+      Organization Settings. This is used as both the OIDC audience and
+      the provider URL path.
+    AllowedPattern: "[a-f0-9-]+"
+
+Resources:
+  CircleCIOIDCProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: !Sub "https://oidc.circleci.com/org/${CircleCIOrgId}"
+      ClientIdList:
+        - !Ref CircleCIOrgId
+      ThumbprintList:
+        - "9e99a48a9960b14926bb7f3b02e22da2b0ab7280"
+
+  CircleCIDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: circleci-cdk-deploy
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref CircleCIOIDCProvider
+            Action: "sts:AssumeRoleWithWebIdentity"
+            Condition:
+              StringEquals:
+                !Sub "oidc.circleci.com/org/${CircleCIOrgId}:aud":
+                  - !Ref CircleCIOrgId
+      ManagedPolicyArns:
+        # CloudFormation full access (CDK needs this to create/update stacks)
+        - arn:aws:iam::aws:policy/AWSCloudFormationFullAccess
+      Policies:
+        - PolicyName: CDKDeployPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # CDK bootstrap resources (S3 staging bucket, ECR, SSM)
+              - Effect: Allow
+                Action:
+                  - "s3:*"
+                Resource:
+                  - !Sub "arn:aws:s3:::cdk-*-assets-${AWS::AccountId}-${AWS::Region}"
+                  - !Sub "arn:aws:s3:::cdk-*-assets-${AWS::AccountId}-${AWS::Region}/*"
+              - Effect: Allow
+                Action:
+                  - "ssm:GetParameter"
+                Resource:
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/cdk-bootstrap/*"
+              # IAM — CDK needs to create/pass roles for Lambda, API GW, etc.
+              - Effect: Allow
+                Action:
+                  - "iam:CreateRole"
+                  - "iam:DeleteRole"
+                  - "iam:GetRole"
+                  - "iam:PutRolePolicy"
+                  - "iam:DeleteRolePolicy"
+                  - "iam:AttachRolePolicy"
+                  - "iam:DetachRolePolicy"
+                  - "iam:PassRole"
+                  - "iam:TagRole"
+                  - "iam:UntagRole"
+                  - "iam:GetRolePolicy"
+                Resource:
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/algoflow-*"
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/AlgoFlow-*"
+              # Lambda
+              - Effect: Allow
+                Action:
+                  - "lambda:*"
+                Resource:
+                  - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:algoflow-*"
+              # API Gateway
+              - Effect: Allow
+                Action:
+                  - "apigateway:*"
+                Resource:
+                  - !Sub "arn:aws:apigateway:${AWS::Region}::*"
+              # Cognito
+              - Effect: Allow
+                Action:
+                  - "cognito-idp:*"
+                Resource:
+                  - !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/*"
+              # DynamoDB
+              - Effect: Allow
+                Action:
+                  - "dynamodb:CreateTable"
+                  - "dynamodb:DeleteTable"
+                  - "dynamodb:DescribeTable"
+                  - "dynamodb:UpdateTable"
+                  - "dynamodb:TagResource"
+                  - "dynamodb:UntagResource"
+                  - "dynamodb:DescribeTimeToLive"
+                  - "dynamodb:UpdateTimeToLive"
+                  - "dynamodb:DescribeContinuousBackups"
+                  - "dynamodb:UpdateContinuousBackups"
+                  - "dynamodb:ListTagsOfResource"
+                Resource:
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/algoflow-*"
+              # S3 (sync bucket)
+              - Effect: Allow
+                Action:
+                  - "s3:CreateBucket"
+                  - "s3:DeleteBucket"
+                  - "s3:PutBucketPolicy"
+                  - "s3:GetBucketPolicy"
+                  - "s3:PutEncryptionConfiguration"
+                  - "s3:GetEncryptionConfiguration"
+                  - "s3:PutBucketVersioning"
+                  - "s3:GetBucketVersioning"
+                  - "s3:PutBucketTagging"
+                  - "s3:GetBucketTagging"
+                  - "s3:PutLifecycleConfiguration"
+                  - "s3:GetLifecycleConfiguration"
+                Resource:
+                  - "arn:aws:s3:::algoflow-*"
+              # CloudWatch Logs
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:DeleteLogGroup"
+                  - "logs:PutRetentionPolicy"
+                  - "logs:DescribeLogGroups"
+                  - "logs:TagLogGroup"
+                  - "logs:TagResource"
+                  - "logs:UntagResource"
+                  - "logs:ListTagsForResource"
+                Resource:
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/algoflow-*"
+              # SSM parameters (Teller certs, config)
+              - Effect: Allow
+                Action:
+                  - "ssm:GetParameter"
+                  - "ssm:GetParameters"
+                Resource:
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/algoflow/*"
+              # CDK needs to look up the CDK bootstrap version
+              - Effect: Allow
+                Action:
+                  - "sts:AssumeRole"
+                Resource:
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/cdk-*"
+
+Outputs:
+  RoleArn:
+    Description: >
+      Set this as AWS_OIDC_ROLE_ARN in your CircleCI project environment variables.
+    Value: !GetAtt CircleCIDeployRole.Arn
+  OIDCProviderArn:
+    Description: CircleCI OIDC Provider ARN
+    Value: !Ref CircleCIOIDCProvider

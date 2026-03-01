@@ -2,6 +2,8 @@ version: 2.1
 
 orbs:
   go: circleci/go@1.11.0
+  aws-cli: circleci/aws-cli@5.4.1
+  node: circleci/node@7.1.0
 
 jobs:
   backend-test:
@@ -59,6 +61,10 @@ jobs:
       - run:
           name: Verify binary
           command: file build/api/bootstrap
+      - persist_to_workspace:
+          root: ~/project
+          paths:
+            - backend/build/api/bootstrap
 
   backend-lint:
     docker:
@@ -74,6 +80,50 @@ jobs:
           name: Run linter
           command: golangci-lint run ./...
 
+  cdk-deploy:
+    docker:
+      - image: cimg/python:3.14-node
+    working_directory: ~/project
+    environment:
+      AWS_REGION: us-east-1
+    steps:
+      - checkout
+      - attach_workspace:
+          at: ~/project
+      - aws-cli/setup:
+          role_arn: ${AWS_OIDC_ROLE_ARN}
+          region: ${AWS_REGION}
+          role_session_name: "circleci-cdk-deploy"
+          session_duration: "1800"
+      - run:
+          name: Install CDK CLI
+          command: sudo npm install -g aws-cdk
+      - run:
+          name: Install Python dependencies
+          command: |
+            cd infrastructure
+            pip install -r requirements.txt 2>/dev/null || pip install aws-cdk-lib constructs python-dotenv "aws-cdk-aws-s3tables-alpha>=2.233.0a0"
+      - run:
+          name: Package Lambda artifact
+          command: |
+            mkdir -p infrastructure/cdk.out
+            cd backend/build/api && zip -j ../../../infrastructure/cdk.out/api-bootstrap.zip bootstrap
+      - run:
+          name: CDK diff (preview changes)
+          command: |
+            cd infrastructure
+            cdk diff AlgoFlow-Auth AlgoFlow-Data AlgoFlow-Api 2>&1 || true
+      - run:
+          name: CDK deploy
+          command: |
+            cd infrastructure
+            cdk deploy AlgoFlow-Auth AlgoFlow-Data AlgoFlow-Api \
+              --require-approval never \
+              --outputs-file cdk-outputs.json
+      - store_artifacts:
+          path: infrastructure/cdk-outputs.json
+          destination: cdk-outputs.json
+
 workflows:
   backend:
     jobs:
@@ -82,3 +132,10 @@ workflows:
       - backend-build:
           requires:
             - backend-test
+      - cdk-deploy:
+          requires:
+            - backend-lint
+            - backend-build
+          filters:
+            branches:
+              only: main
