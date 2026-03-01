@@ -1,10 +1,10 @@
 import React from 'react';
-import { Home, PieChart, Clock, HelpCircle, Settings, ChevronDown } from 'lucide-react';
-import PlaidLinkButton from './PlaidLink';
+import { Home, PieChart, Clock, Settings, ChevronDown } from 'lucide-react';
+import BankEnrollButton from './BankEnroll';
 import { useAccounts } from '../hooks/useBackend';
 import type { Account } from '../types';
 
-export type Page = 'dashboard' | 'investments' | 'retirement';
+export type Page = 'dashboard' | 'investments' | 'retirement' | 'settings';
 
 interface NavigationProps {
   activePage: Page;
@@ -15,16 +15,10 @@ interface NavigationProps {
 const Navigation: React.FC<NavigationProps> = ({ activePage, onNavigate, onAccountsChanged }) => {
   const { accounts, refresh: refreshAccounts } = useAccounts();
 
-  const menuItems: { icon: typeof Home; label: string; page: Page }[] = [
+  const mainItems: { icon: typeof Home; label: string; page: Page }[] = [
     { icon: Home, label: 'Dashboard', page: 'dashboard' },
     { icon: PieChart, label: 'Investments', page: 'investments' },
     { icon: Clock, label: 'Retirement', page: 'retirement' },
-  ];
-
-  const bottomItems = [
-    { icon: Home, label: 'Start here' },
-    { icon: HelpCircle, label: 'Get help' },
-    { icon: Settings, label: 'Settings' },
   ];
 
   const groupedAccounts = accounts.reduce<Record<string, Account[]>>((groups, account) => {
@@ -39,7 +33,7 @@ const Navigation: React.FC<NavigationProps> = ({ activePage, onNavigate, onAccou
     'Depository': 'text-green-400',
   };
 
-  const handlePlaidSuccess = () => {
+  const handleEnrollSuccess = () => {
     refreshAccounts();
     onAccountsChanged?.();
   };
@@ -52,10 +46,10 @@ const Navigation: React.FC<NavigationProps> = ({ activePage, onNavigate, onAccou
         </h2>
         <p className="text-xs text-gray-400">Smart Financial Management</p>
       </div>
-      
+
       <nav className="mb-8">
         <div className="space-y-1">
-          {menuItems.map((item) => {
+          {mainItems.map((item) => {
             const isActive = item.page === activePage;
             return (
               <button
@@ -63,7 +57,7 @@ const Navigation: React.FC<NavigationProps> = ({ activePage, onNavigate, onAccou
                 onClick={() => onNavigate(item.page)}
                 className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all duration-200 group ${
                   isActive
-                    ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg transform scale-105' 
+                    ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg transform scale-105'
                     : 'text-gray-300 hover:bg-gray-700 hover:text-white hover:translate-x-1'
                 }`}
               >
@@ -72,7 +66,7 @@ const Navigation: React.FC<NavigationProps> = ({ activePage, onNavigate, onAccou
                 </div>
                 <span className="font-medium">{item.label}</span>
                 {isActive && (
-                  <div className="ml-auto w-2 h-2 bg-white rounded-full animate-pulse"></div>
+                  <div className="ml-auto w-2 h-2 bg-white rounded-full animate-pulse" />
                 )}
               </button>
             );
@@ -88,13 +82,13 @@ const Navigation: React.FC<NavigationProps> = ({ activePage, onNavigate, onAccou
 
         {accounts.length === 0 ? (
           <div className="text-sm text-gray-500 mb-4 px-2">
-            No accounts connected yet. Connect a bank to get started.
+            No accounts connected yet.
           </div>
         ) : (
           Object.entries(groupedAccounts).map(([type, accts]) => (
             <div key={type} className="mb-6">
               <div className={`text-sm font-semibold mb-3 ${typeColors[type] || 'text-gray-400'} flex items-center`}>
-                <div className="w-2 h-2 bg-current rounded-full mr-2"></div>
+                <div className="w-2 h-2 bg-current rounded-full mr-2" />
                 {type}
               </div>
               <div className="space-y-2 ml-4">
@@ -105,11 +99,16 @@ const Navigation: React.FC<NavigationProps> = ({ activePage, onNavigate, onAccou
                   >
                     <span className="text-gray-400 truncate mr-2">
                       {account.name}
-                      {account.mask && <span className="text-gray-500"> ••{account.mask}</span>}
+                      {account.mask && (
+                        <span className="text-gray-500"> ••{account.mask}</span>
+                      )}
                     </span>
                     {account.current_balance != null && (
                       <span className="text-gray-300 font-medium whitespace-nowrap">
-                        ${Math.abs(account.current_balance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        ${Math.abs(account.current_balance).toLocaleString(undefined, {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
                       </span>
                     )}
                   </div>
@@ -120,22 +119,22 @@ const Navigation: React.FC<NavigationProps> = ({ activePage, onNavigate, onAccou
         )}
 
         <div className="mt-4">
-          <PlaidLinkButton onSuccess={handlePlaidSuccess} />
+          <BankEnrollButton onSuccess={handleEnrollSuccess} />
         </div>
       </div>
 
-      <div className="border-t border-gray-700 pt-6">
-        <nav className="space-y-1">
-          {bottomItems.map((item, index) => (
-            <button
-              key={index}
-              className="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-gray-400 hover:bg-gray-700 hover:text-white transition-all duration-200 hover:translate-x-1"
-            >
-              <item.icon size={18} />
-              <span className="text-sm font-medium">{item.label}</span>
-            </button>
-          ))}
-        </nav>
+      <div className="border-t border-gray-700 pt-4">
+        <button
+          onClick={() => onNavigate('settings')}
+          className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all duration-200 group ${
+            activePage === 'settings'
+              ? 'bg-gray-700 text-white'
+              : 'text-gray-400 hover:bg-gray-700 hover:text-white hover:translate-x-1'
+          }`}
+        >
+          <Settings size={18} />
+          <span className="text-sm font-medium">Settings</span>
+        </button>
       </div>
     </div>
   );

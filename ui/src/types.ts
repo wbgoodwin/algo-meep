@@ -1,7 +1,7 @@
 export interface Account {
   id: string;
   institution_id: string;
-  plaid_account_id: string;
+  provider_account_id: string;
   name: string;
   official_name: string | null;
   account_type: string;
@@ -16,7 +16,7 @@ export interface Account {
 export interface Transaction {
   id: string;
   account_id: string;
-  plaid_transaction_id: string | null;
+  provider_transaction_id: string | null;
   amount: number;
   date: string;
   name: string;
@@ -32,7 +32,7 @@ export interface Transaction {
 export interface Institution {
   id: string;
   name: string;
-  plaid_institution_id: string | null;
+  provider: string | null;
   logo: string | null;
   primary_color: string | null;
 }
@@ -59,4 +59,14 @@ export interface DashboardData {
   total_balance: number;
   total_credit_debt: number;
   categories: CategorySpending[];
+}
+
+export interface AuthResult {
+  authenticated: boolean;
+}
+
+export interface BankEnrollResult {
+  session_url: string;
+  session_id: string;
+  provider: string;
 }

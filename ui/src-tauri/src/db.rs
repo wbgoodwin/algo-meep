@@ -36,8 +36,8 @@ impl Database {
             CREATE TABLE IF NOT EXISTS credentials (
                 id TEXT PRIMARY KEY,
                 institution_id TEXT NOT NULL,
-                access_token TEXT NOT NULL,
-                item_id TEXT NOT NULL,
+                encrypted_access_token TEXT NOT NULL,
+                provider TEXT NOT NULL DEFAULT 'teller',
                 cursor TEXT,
                 last_synced_at TEXT,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),

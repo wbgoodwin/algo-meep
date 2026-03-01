@@ -21,7 +21,6 @@ interface TopCategoriesProps {
 
 const TopCategories: React.FC<TopCategoriesProps> = ({ categories, loading }) => {
   const totalSpent = categories.reduce((sum, cat) => sum + cat.amount, 0);
-  const maxAmount = categories.length > 0 ? Math.max(...categories.map((c) => c.amount)) : 1;
 
   if (loading) {
     return (
@@ -61,27 +60,30 @@ const TopCategories: React.FC<TopCategoriesProps> = ({ categories, loading }) =>
       ) : (
         <div className="space-y-4">
           {categories.map((category, index) => {
-            const percentage = (category.amount / maxAmount) * 100;
+            const pct = totalSpent > 0 ? (category.amount / totalSpent) * 100 : 0;
             const color = CATEGORY_COLORS[index % CATEGORY_COLORS.length];
-            
+
             return (
               <div key={category.name} className="group">
                 <div className="flex justify-between items-center mb-2">
                   <div className="flex items-center space-x-2">
-                    <div className={`w-3 h-3 rounded-full ${color}`}></div>
+                    <div className={`w-3 h-3 rounded-full ${color}`} />
                     <span className="text-sm font-semibold text-white group-hover:text-blue-400 transition-colors">
                       {category.name.replace(/_/g, ' ')}
                     </span>
                   </div>
-                  <div className="text-sm font-medium text-white">
-                    ${category.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  <div className="flex items-center space-x-3">
+                    <span className="text-xs text-gray-400">{pct.toFixed(1)}%</span>
+                    <span className="text-sm font-medium text-white">
+                      ${category.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
                   </div>
                 </div>
-                
-                <Progress.Root className="relative h-3 bg-gray-700 rounded-full overflow-hidden">
+
+                <Progress.Root className="relative h-2.5 bg-gray-700 rounded-full overflow-hidden">
                   <Progress.Indicator
                     className={`h-full rounded-full transition-all duration-500 ease-out ${color}`}
-                    style={{ width: `${Math.min(percentage, 100)}%` }}
+                    style={{ width: `${Math.min(pct, 100)}%` }}
                   />
                 </Progress.Root>
               </div>
