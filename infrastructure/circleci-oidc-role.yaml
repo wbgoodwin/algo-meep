@@ -32,16 +32,27 @@ Resources:
     Properties:
       RoleName: circleci-cdk-deploy
       AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Federated: !Ref CircleCIOIDCProvider
-            Action: "sts:AssumeRoleWithWebIdentity"
-            Condition:
-              StringEquals:
-                !Sub "oidc.circleci.com/org/${CircleCIOrgId}:aud":
-                  - !Ref CircleCIOrgId
+        Fn::Sub:
+          - |
+            {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Principal": {
+                    "Federated": "${ProviderArn}"
+                  },
+                  "Action": "sts:AssumeRoleWithWebIdentity",
+                  "Condition": {
+                    "StringEquals": {
+                      "oidc.circleci.com/org/${OrgId}:aud": "${OrgId}"
+                    }
+                  }
+                }
+              ]
+            }
+          - ProviderArn: !Ref CircleCIOIDCProvider
+            OrgId: !Ref CircleCIOrgId
       ManagedPolicyArns:
         # CloudFormation full access (CDK needs this to create/update stacks)
         - arn:aws:iam::aws:policy/AWSCloudFormationFullAccess
