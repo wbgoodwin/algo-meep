@@ -88,27 +88,27 @@ type AccountsRequest struct {
 }
 
 type Account struct {
-	ID              string  `json:"id"`
-	InstitutionID   string  `json:"institution_id"`
-	Name            string  `json:"name"`
-	Type            string  `json:"type"`
-	Subtype         string  `json:"subtype"`
-	CurrentBalance  float64 `json:"current_balance"`
+	ID               string  `json:"id"`
+	InstitutionID    string  `json:"institution_id"`
+	Name             string  `json:"name"`
+	Type             string  `json:"type"`
+	Subtype          string  `json:"subtype"`
+	CurrentBalance   float64 `json:"current_balance"`
 	AvailableBalance float64 `json:"available_balance,omitempty"`
-	CurrencyCode    string  `json:"currency_code"`
-	LastUpdated     string  `json:"last_updated"`
+	CurrencyCode     string  `json:"currency_code"`
+	LastUpdated      string  `json:"last_updated"`
 }
 
 type Transaction struct {
-	ID             string  `json:"id"`
-	AccountID      string  `json:"account_id"`
-	Amount         float64 `json:"amount"`
-	Date           string  `json:"date"`
-	Description    string  `json:"description"`
-	MerchantName   string  `json:"merchant_name,omitempty"`
-	Category       string  `json:"category,omitempty"`
-	Pending        bool    `json:"pending"`
-	CurrencyCode   string  `json:"currency_code"`
+	ID           string  `json:"id"`
+	AccountID    string  `json:"account_id"`
+	Amount       float64 `json:"amount"`
+	Date         string  `json:"date"`
+	Description  string  `json:"description"`
+	MerchantName string  `json:"merchant_name,omitempty"`
+	Category     string  `json:"category,omitempty"`
+	Pending      bool    `json:"pending"`
+	CurrencyCode string  `json:"currency_code"`
 }
 
 type Institution struct {
@@ -122,8 +122,8 @@ type ProvidersResponse struct {
 }
 
 type ProviderInfo struct {
-	Name           string `json:"name"`
-	InstitutionCount int  `json:"institution_count"`
+	Name             string `json:"name"`
+	InstitutionCount int    `json:"institution_count"`
 }
 
 // --- User types ---
@@ -146,4 +146,35 @@ type UsageResponse struct {
 	SyncStorageBytes int64   `json:"sync_storage_bytes"`
 	APICalls         int     `json:"api_calls"`
 	EstimatedCost    float64 `json:"estimated_cost"`
+}
+
+// --- Sync types ---
+
+type SyncPushRequest struct {
+	Data     string `json:"data"`      // base64-encoded encrypted blob
+	Checksum string `json:"checksum"`  // client-computed checksum (e.g. "sha256:<hex>")
+	DeviceID string `json:"device_id"` // originating device identifier
+}
+
+type SyncPushResponse struct {
+	Version   int    `json:"version"`
+	SizeBytes int64  `json:"size_bytes"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+type SyncPullResponse struct {
+	URL       string `json:"url"` // presigned S3 download URL (expires in 15min)
+	Version   int    `json:"version"`
+	SizeBytes int64  `json:"size_bytes"`
+	Checksum  string `json:"checksum"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+type SyncStatusResponse struct {
+	HasData   bool   `json:"has_data"`
+	Version   int    `json:"version,omitempty"`
+	SizeBytes int64  `json:"size_bytes,omitempty"`
+	Checksum  string `json:"checksum,omitempty"`
+	DeviceID  string `json:"device_id,omitempty"`
+	UpdatedAt string `json:"updated_at,omitempty"`
 }

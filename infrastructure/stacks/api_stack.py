@@ -23,6 +23,7 @@ class ApiStack(Stack):
         sync_table_arn: str,
         usage_table_arn: str,
         sync_bucket_arn: str,
+        sync_bucket_name: str,
         token_encryption_key_arn: str,
         **kwargs,
     ) -> None:
@@ -137,6 +138,7 @@ class ApiStack(Stack):
                 "TELLER_ENV": "sandbox",
                 "KMS_KEY_ARN": token_encryption_key_arn,
                 "ALLOWED_IPS": "141.152.50.56",  # IP allowlist (comma-separated)
+                "SYNC_BUCKET": sync_bucket_name,
                 # TELLER_API_KEY, TELLER_CERT_PEM, TELLER_KEY_PEM loaded from SSM at runtime
             },
         )
@@ -203,6 +205,9 @@ class ApiStack(Stack):
             ("PostBankAccounts", "POST /bank/accounts"),
             ("PostBankSyncTransactions", "POST /bank/sync-transactions"),
             ("GetBankProviders", "GET /bank/providers"),
+            ("PostSyncPush", "POST /sync/push"),
+            ("GetSyncPull", "GET /sync/pull"),
+            ("GetSyncStatus", "GET /sync/status"),
         ]
 
         for route_id, route_key in auth_routes:
