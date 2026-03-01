@@ -7,20 +7,23 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/cognitoidentityprovider"
 	cognitotypes "github.com/aws/aws-sdk-go-v2/service/cognitoidentityprovider/types"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	dbtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
-
 	"github.com/aws/aws-sdk-go-v2/service/kms"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"github.com/wbgoodwin/algo-meep/backend/internal/auth"
 	"github.com/wbgoodwin/algo-meep/backend/internal/crypto"
 	"github.com/wbgoodwin/algo-meep/backend/internal/middleware"
 	"github.com/wbgoodwin/algo-meep/backend/internal/provider"
+	syncpkg "github.com/wbgoodwin/algo-meep/backend/internal/sync"
 	"github.com/wbgoodwin/algo-meep/backend/internal/user"
 	"github.com/wbgoodwin/algo-meep/backend/pkg/api"
 )
@@ -1175,5 +1178,392 @@ func TestHandler_ResponseContentType(t *testing.T) {
 	resp, _ := a.Handler(context.Background(), makePublicRequest("GET /health", ""))
 	if resp.Headers["Content-Type"] != "application/json" {
 		t.Errorf("expected Content-Type=application/json, got %s", resp.Headers["Content-Type"])
+	}
+}
+
+// ============================================================
+// Sync mock clients (for sync service injection into App)
+// ============================================================
+
+type mockSyncDynamo struct {
+	putItemFn func(ctx context.Context, params *dynamodb.PutItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error)
+	getItemFn func(ctx context.Context, params *dynamodb.GetItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error)
+}
+
+func (m *mockSyncDynamo) PutItem(ctx context.Context, params *dynamodb.PutItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error) {
+	if m.putItemFn != nil {
+		return m.putItemFn(ctx, params, optFns...)
+	}
+	return &dynamodb.PutItemOutput{}, nil
+}
+
+func (m *mockSyncDynamo) GetItem(ctx context.Context, params *dynamodb.GetItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+	if m.getItemFn != nil {
+		return m.getItemFn(ctx, params, optFns...)
+	}
+	return &dynamodb.GetItemOutput{}, nil
+}
+
+type mockSyncS3 struct {
+	putObjectFn func(ctx context.Context, params *s3.PutObjectInput, optFns ...func(*s3.Options)) (*s3.PutObjectOutput, error)
+}
+
+func (m *mockSyncS3) PutObject(ctx context.Context, params *s3.PutObjectInput, optFns ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
+	if m.putObjectFn != nil {
+		return m.putObjectFn(ctx, params, optFns...)
+	}
+	return &s3.PutObjectOutput{}, nil
+}
+
+type mockSyncPresigner struct {
+	url string
+	err error
+}
+
+func (m *mockSyncPresigner) PresignGetObject(_ context.Context, _, _ string, _ time.Duration) (string, error) {
+	if m.err != nil {
+		return "", m.err
+	}
+	if m.url != "" {
+		return m.url, nil
+	}
+	return "https://s3.example.com/presigned", nil
+}
+
+func makeSyncItem(userID string, version int, sizeBytes int64, checksum, deviceID string) map[string]dbtypes.AttributeValue {
+	type syncRecord struct {
+		PK        string `dynamodbav:"PK"`
+		SK        string `dynamodbav:"SK"`
+		Version   int    `dynamodbav:"version"`
+		SizeBytes int64  `dynamodbav:"size_bytes"`
+		Checksum  string `dynamodbav:"checksum"`
+		DeviceID  string `dynamodbav:"device_id"`
+		UpdatedAt string `dynamodbav:"updated_at"`
+	}
+	record := syncRecord{
+		PK:        fmt.Sprintf("USER#%s", userID),
+		SK:        "SYNC",
+		Version:   version,
+		SizeBytes: sizeBytes,
+		Checksum:  checksum,
+		DeviceID:  deviceID,
+		UpdatedAt: "2025-01-01T00:00:00Z",
+	}
+	item, _ := attributevalue.MarshalMap(record)
+	return item
+}
+
+func newTestAppWithSync(syncDB *mockSyncDynamo, syncS3 *mockSyncS3, presigner *mockSyncPresigner) *App {
+	a := newTestApp()
+	a.SyncService = syncpkg.NewServiceWithClients(syncDB, syncS3, presigner, "test-sync-bucket")
+	return a
+}
+
+// ============================================================
+// Sync endpoint tests
+// ============================================================
+
+func TestHandler_SyncPush_Success(t *testing.T) {
+	syncDB := &mockSyncDynamo{
+		getItemFn: func(_ context.Context, _ *dynamodb.GetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+			return &dynamodb.GetItemOutput{Item: nil}, nil
+		},
+	}
+	a := newTestAppWithSync(syncDB, &mockSyncS3{}, &mockSyncPresigner{})
+
+	body := `{"data":"ZW5jcnlwdGVkLWJsb2I=","checksum":"sha256:abc123","device_id":"device-a"}`
+	resp, _ := a.Handler(context.Background(), makeAuthRequest("POST /sync/push", body))
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, resp.Body)
+	}
+	parsed := parseResponse(t, resp)
+	if !parsed.Success {
+		t.Fatal("expected success=true")
+	}
+
+	var pushResp api.SyncPushResponse
+	dataBytes, _ := json.Marshal(parsed.Data)
+	if err := json.Unmarshal(dataBytes, &pushResp); err != nil {
+		t.Fatalf("failed to parse push response: %v", err)
+	}
+	if pushResp.Version != 1 {
+		t.Errorf("expected version 1, got %d", pushResp.Version)
+	}
+}
+
+func TestHandler_SyncPush_MissingData(t *testing.T) {
+	a := newTestAppWithSync(&mockSyncDynamo{}, &mockSyncS3{}, &mockSyncPresigner{})
+
+	body := `{"checksum":"sha256:abc","device_id":"d"}`
+	resp, _ := a.Handler(context.Background(), makeAuthRequest("POST /sync/push", body))
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", resp.StatusCode, resp.Body)
+	}
+}
+
+func TestHandler_SyncPush_MissingChecksum(t *testing.T) {
+	a := newTestAppWithSync(&mockSyncDynamo{}, &mockSyncS3{}, &mockSyncPresigner{})
+
+	body := `{"data":"blob","device_id":"d"}`
+	resp, _ := a.Handler(context.Background(), makeAuthRequest("POST /sync/push", body))
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", resp.StatusCode, resp.Body)
+	}
+}
+
+func TestHandler_SyncPush_MissingDeviceID(t *testing.T) {
+	a := newTestAppWithSync(&mockSyncDynamo{}, &mockSyncS3{}, &mockSyncPresigner{})
+
+	body := `{"data":"blob","checksum":"sha256:abc"}`
+	resp, _ := a.Handler(context.Background(), makeAuthRequest("POST /sync/push", body))
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", resp.StatusCode, resp.Body)
+	}
+}
+
+func TestHandler_SyncPush_InvalidBody(t *testing.T) {
+	a := newTestAppWithSync(&mockSyncDynamo{}, &mockSyncS3{}, &mockSyncPresigner{})
+
+	resp, _ := a.Handler(context.Background(), makeAuthRequest("POST /sync/push", "not json"))
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", resp.StatusCode, resp.Body)
+	}
+}
+
+func TestHandler_SyncPush_S3Error(t *testing.T) {
+	syncDB := &mockSyncDynamo{
+		getItemFn: func(_ context.Context, _ *dynamodb.GetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+			return &dynamodb.GetItemOutput{Item: nil}, nil
+		},
+	}
+	syncS3 := &mockSyncS3{
+		putObjectFn: func(_ context.Context, _ *s3.PutObjectInput, _ ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
+			return nil, fmt.Errorf("s3 unavailable")
+		},
+	}
+	a := newTestAppWithSync(syncDB, syncS3, &mockSyncPresigner{})
+
+	body := `{"data":"ZW5jcnlwdGVk","checksum":"sha256:abc","device_id":"d"}`
+	resp, _ := a.Handler(context.Background(), makeAuthRequest("POST /sync/push", body))
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", resp.StatusCode, resp.Body)
+	}
+}
+
+func TestHandler_SyncPush_NoSyncService(t *testing.T) {
+	a := newTestApp() // no sync service
+	body := `{"data":"ZW5jcnlwdGVk","checksum":"sha256:abc","device_id":"d"}`
+	resp, _ := a.Handler(context.Background(), makeAuthRequest("POST /sync/push", body))
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", resp.StatusCode, resp.Body)
+	}
+}
+
+func TestHandler_SyncPull_Success(t *testing.T) {
+	syncDB := &mockSyncDynamo{
+		getItemFn: func(_ context.Context, _ *dynamodb.GetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+			return &dynamodb.GetItemOutput{
+				Item: makeSyncItem("user-123", 5, 2048, "sha256:xyz", "device-a"),
+			}, nil
+		},
+	}
+	presigner := &mockSyncPresigner{url: "https://s3.example.com/sync/user-123/db.enc?signed"}
+	a := newTestAppWithSync(syncDB, &mockSyncS3{}, presigner)
+
+	resp, _ := a.Handler(context.Background(), makeAuthRequest("GET /sync/pull", ""))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, resp.Body)
+	}
+
+	parsed := parseResponse(t, resp)
+	if !parsed.Success {
+		t.Fatal("expected success=true")
+	}
+
+	var pullResp api.SyncPullResponse
+	dataBytes, _ := json.Marshal(parsed.Data)
+	if err := json.Unmarshal(dataBytes, &pullResp); err != nil {
+		t.Fatalf("failed to parse pull response: %v", err)
+	}
+	if pullResp.Version != 5 {
+		t.Errorf("expected version 5, got %d", pullResp.Version)
+	}
+	if pullResp.URL == "" {
+		t.Error("expected presigned URL")
+	}
+	if pullResp.Checksum != "sha256:xyz" {
+		t.Errorf("expected checksum sha256:xyz, got %s", pullResp.Checksum)
+	}
+}
+
+func TestHandler_SyncPull_NoData(t *testing.T) {
+	syncDB := &mockSyncDynamo{
+		getItemFn: func(_ context.Context, _ *dynamodb.GetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+			return &dynamodb.GetItemOutput{Item: nil}, nil
+		},
+	}
+	a := newTestAppWithSync(syncDB, &mockSyncS3{}, &mockSyncPresigner{})
+
+	resp, _ := a.Handler(context.Background(), makeAuthRequest("GET /sync/pull", ""))
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", resp.StatusCode, resp.Body)
+	}
+}
+
+func TestHandler_SyncPull_NoSyncService(t *testing.T) {
+	a := newTestApp()
+	resp, _ := a.Handler(context.Background(), makeAuthRequest("GET /sync/pull", ""))
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", resp.StatusCode, resp.Body)
+	}
+}
+
+func TestHandler_SyncPull_PresignError(t *testing.T) {
+	syncDB := &mockSyncDynamo{
+		getItemFn: func(_ context.Context, _ *dynamodb.GetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+			return &dynamodb.GetItemOutput{
+				Item: makeSyncItem("user-123", 1, 100, "x", "d"),
+			}, nil
+		},
+	}
+	presigner := &mockSyncPresigner{err: fmt.Errorf("presign failed")}
+	a := newTestAppWithSync(syncDB, &mockSyncS3{}, presigner)
+
+	resp, _ := a.Handler(context.Background(), makeAuthRequest("GET /sync/pull", ""))
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", resp.StatusCode, resp.Body)
+	}
+}
+
+func TestHandler_SyncStatus_HasData(t *testing.T) {
+	syncDB := &mockSyncDynamo{
+		getItemFn: func(_ context.Context, _ *dynamodb.GetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+			return &dynamodb.GetItemOutput{
+				Item: makeSyncItem("user-123", 3, 1024, "sha256:abc", "device-a"),
+			}, nil
+		},
+	}
+	a := newTestAppWithSync(syncDB, &mockSyncS3{}, &mockSyncPresigner{})
+
+	resp, _ := a.Handler(context.Background(), makeAuthRequest("GET /sync/status", ""))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, resp.Body)
+	}
+
+	parsed := parseResponse(t, resp)
+	if !parsed.Success {
+		t.Fatal("expected success=true")
+	}
+
+	var statusResp api.SyncStatusResponse
+	dataBytes, _ := json.Marshal(parsed.Data)
+	if err := json.Unmarshal(dataBytes, &statusResp); err != nil {
+		t.Fatalf("failed to parse status response: %v", err)
+	}
+	if !statusResp.HasData {
+		t.Error("expected has_data=true")
+	}
+	if statusResp.Version != 3 {
+		t.Errorf("expected version 3, got %d", statusResp.Version)
+	}
+	if statusResp.DeviceID != "device-a" {
+		t.Errorf("expected device-a, got %s", statusResp.DeviceID)
+	}
+}
+
+func TestHandler_SyncStatus_NoData(t *testing.T) {
+	syncDB := &mockSyncDynamo{
+		getItemFn: func(_ context.Context, _ *dynamodb.GetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+			return &dynamodb.GetItemOutput{Item: nil}, nil
+		},
+	}
+	a := newTestAppWithSync(syncDB, &mockSyncS3{}, &mockSyncPresigner{})
+
+	resp, _ := a.Handler(context.Background(), makeAuthRequest("GET /sync/status", ""))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, resp.Body)
+	}
+
+	parsed := parseResponse(t, resp)
+	var statusResp api.SyncStatusResponse
+	dataBytes, _ := json.Marshal(parsed.Data)
+	if err := json.Unmarshal(dataBytes, &statusResp); err != nil {
+		t.Fatalf("failed to parse status response: %v", err)
+	}
+	if statusResp.HasData {
+		t.Error("expected has_data=false")
+	}
+}
+
+func TestHandler_SyncStatus_NoSyncService(t *testing.T) {
+	a := newTestApp()
+	resp, _ := a.Handler(context.Background(), makeAuthRequest("GET /sync/status", ""))
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", resp.StatusCode, resp.Body)
+	}
+}
+
+func TestHandler_SyncStatus_DynamoError(t *testing.T) {
+	syncDB := &mockSyncDynamo{
+		getItemFn: func(_ context.Context, _ *dynamodb.GetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+			return nil, fmt.Errorf("dynamo error")
+		},
+	}
+	a := newTestAppWithSync(syncDB, &mockSyncS3{}, &mockSyncPresigner{})
+
+	resp, _ := a.Handler(context.Background(), makeAuthRequest("GET /sync/status", ""))
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", resp.StatusCode, resp.Body)
+	}
+}
+
+func TestHandler_SyncPush_InvalidBase64(t *testing.T) {
+	syncDB := &mockSyncDynamo{
+		getItemFn: func(_ context.Context, _ *dynamodb.GetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+			return &dynamodb.GetItemOutput{Item: nil}, nil
+		},
+	}
+	a := newTestAppWithSync(syncDB, &mockSyncS3{}, &mockSyncPresigner{})
+
+	body := `{"data":"not!valid!base64!!!","checksum":"sha256:abc","device_id":"d"}`
+	resp, _ := a.Handler(context.Background(), makeAuthRequest("POST /sync/push", body))
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", resp.StatusCode, resp.Body)
+	}
+}
+
+func TestHandler_SyncPush_VersionConflict(t *testing.T) {
+	syncDB := &mockSyncDynamo{
+		getItemFn: func(_ context.Context, _ *dynamodb.GetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+			return &dynamodb.GetItemOutput{
+				Item: makeSyncItem("user-123", 5, 512, "old", "device-b"),
+			}, nil
+		},
+		putItemFn: func(_ context.Context, _ *dynamodb.PutItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error) {
+			return nil, &dbtypes.ConditionalCheckFailedException{Message: aws.String("condition not met")}
+		},
+	}
+	a := newTestAppWithSync(syncDB, &mockSyncS3{}, &mockSyncPresigner{})
+
+	body := `{"data":"ZW5jcnlwdGVk","checksum":"sha256:abc","device_id":"d"}`
+	resp, _ := a.Handler(context.Background(), makeAuthRequest("POST /sync/push", body))
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", resp.StatusCode, resp.Body)
+	}
+}
+
+func TestHandler_SyncPush_RequiresAuth(t *testing.T) {
+	a := newTestAppWithSync(&mockSyncDynamo{}, &mockSyncS3{}, &mockSyncPresigner{})
+	// Request with JWT but empty claims (no "sub")
+	req := makePublicRequest("POST /sync/push", `{"data":"x","checksum":"y","device_id":"z"}`)
+	req.RequestContext.Authorizer = &events.APIGatewayV2HTTPRequestContextAuthorizerDescription{
+		JWT: &events.APIGatewayV2HTTPRequestContextAuthorizerJWTDescription{
+			Claims: map[string]string{},
+		},
+	}
+	resp, _ := a.Handler(context.Background(), req)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", resp.StatusCode, resp.Body)
 	}
 }

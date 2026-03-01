@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"github.com/wbgoodwin/algo-meep/backend/internal/crypto"
 	"github.com/wbgoodwin/algo-meep/backend/internal/middleware"
 	"github.com/wbgoodwin/algo-meep/backend/internal/provider"
+	syncpkg "github.com/wbgoodwin/algo-meep/backend/internal/sync"
 	"github.com/wbgoodwin/algo-meep/backend/internal/user"
 	"github.com/wbgoodwin/algo-meep/backend/pkg/api"
 )
@@ -30,6 +32,7 @@ type App struct {
 	ProviderReg    *provider.Registry
 	AllowedIPs     map[string]bool
 	TokenEncryptor *crypto.TokenEncryptor
+	SyncService    *syncpkg.Service
 }
 
 var app *App
@@ -96,6 +99,15 @@ func init() {
 		logger.Warn("KMS_KEY_ARN not set — token encryption disabled (must be set in production)")
 	}
 
+	// Sync service (S3 + DynamoDB)
+	var syncSvc *syncpkg.Service
+	if syncBucket := os.Getenv("SYNC_BUCKET"); syncBucket != "" {
+		syncSvc = syncpkg.NewService(awsCfg, syncBucket)
+		logger.Info("Sync service initialized", middleware.WithField("bucket", syncBucket))
+	} else {
+		logger.Warn("SYNC_BUCKET not set — sync endpoints disabled")
+	}
+
 	app = &App{
 		Log:            logger,
 		AuthService:    authSvc,
@@ -103,6 +115,7 @@ func init() {
 		ProviderReg:    providerReg,
 		AllowedIPs:     allowedIPs,
 		TokenEncryptor: tokenEnc,
+		SyncService:    syncSvc,
 	}
 
 	logger.Info("API Lambda initialized",
@@ -179,6 +192,20 @@ func (a *App) Handler(ctx context.Context, req events.APIGatewayV2HTTPRequest) (
 	case "GET /bank/providers":
 		statusCode, body = a.withAuth(req, func(_ string) (int, []byte) {
 			return a.handleBankProviders()
+		})
+
+	// --- Sync routes ---
+	case "POST /sync/push":
+		statusCode, body = a.withAuth(req, func(userID string) (int, []byte) {
+			return a.handleSyncPush(ctx, req, userID)
+		})
+	case "GET /sync/pull":
+		statusCode, body = a.withAuth(req, func(userID string) (int, []byte) {
+			return a.handleSyncPull(ctx, userID)
+		})
+	case "GET /sync/status":
+		statusCode, body = a.withAuth(req, func(userID string) (int, []byte) {
+			return a.handleSyncStatus(ctx, userID)
 		})
 
 	default:
@@ -583,6 +610,106 @@ func (a *App) handleBankProviders() (int, []byte) {
 		}
 	}
 	resp, _ := api.SuccessJSON(api.ProvidersResponse{Providers: providers})
+	return http.StatusOK, resp
+}
+
+// --- Sync handlers ---
+
+func (a *App) handleSyncPush(ctx context.Context, req events.APIGatewayV2HTTPRequest, userID string) (int, []byte) {
+	if a.SyncService == nil {
+		return api.NewInternal("sync not configured", fmt.Errorf("SYNC_BUCKET not set")).ToAPIResponse()
+	}
+
+	var input api.SyncPushRequest
+	if err := json.Unmarshal([]byte(req.Body), &input); err != nil {
+		return api.NewBadRequest("invalid request body").ToAPIResponse()
+	}
+	if input.Data == "" {
+		return api.NewBadRequest("data is required").ToAPIResponse()
+	}
+	if input.Checksum == "" {
+		return api.NewBadRequest("checksum is required").ToAPIResponse()
+	}
+	if input.DeviceID == "" {
+		return api.NewBadRequest("device_id is required").ToAPIResponse()
+	}
+
+	reader, sizeBytes, err := syncpkg.ParsePushBody(input.Data)
+	if err != nil {
+		return api.NewBadRequest("invalid base64 data").ToAPIResponse()
+	}
+
+	record, err := a.SyncService.Push(ctx, userID, reader, sizeBytes, input.Checksum, input.DeviceID)
+	if err != nil {
+		if errors.Is(err, syncpkg.ErrVersionConflict) {
+			return api.NewConflict("sync version conflict — retry push").ToAPIResponse()
+		}
+		a.Log.Error("Sync push failed", err, middleware.WithUserID(userID))
+		return api.NewInternal("sync push failed", err).ToAPIResponse()
+	}
+
+	a.Log.Info("Sync push completed",
+		middleware.WithUserID(userID),
+		middleware.WithField("version", fmt.Sprintf("%d", record.Version)),
+		middleware.WithField("size_bytes", fmt.Sprintf("%d", record.SizeBytes)),
+	)
+
+	resp, _ := api.SuccessJSON(api.SyncPushResponse{
+		Version:   record.Version,
+		SizeBytes: record.SizeBytes,
+		UpdatedAt: record.UpdatedAt,
+	})
+	return http.StatusOK, resp
+}
+
+func (a *App) handleSyncPull(ctx context.Context, userID string) (int, []byte) {
+	if a.SyncService == nil {
+		return api.NewInternal("sync not configured", fmt.Errorf("SYNC_BUCKET not set")).ToAPIResponse()
+	}
+
+	url, record, err := a.SyncService.Pull(ctx, userID)
+	if err != nil {
+		a.Log.Error("Sync pull failed", err, middleware.WithUserID(userID))
+		return api.NewInternal("sync pull failed", err).ToAPIResponse()
+	}
+	if record == nil {
+		return api.NewNotFound("no sync data found").ToAPIResponse()
+	}
+
+	resp, _ := api.SuccessJSON(api.SyncPullResponse{
+		URL:       url,
+		Version:   record.Version,
+		SizeBytes: record.SizeBytes,
+		Checksum:  record.Checksum,
+		UpdatedAt: record.UpdatedAt,
+	})
+	return http.StatusOK, resp
+}
+
+func (a *App) handleSyncStatus(ctx context.Context, userID string) (int, []byte) {
+	if a.SyncService == nil {
+		return api.NewInternal("sync not configured", fmt.Errorf("SYNC_BUCKET not set")).ToAPIResponse()
+	}
+
+	record, err := a.SyncService.GetStatus(ctx, userID)
+	if err != nil {
+		a.Log.Error("Sync status failed", err, middleware.WithUserID(userID))
+		return api.NewInternal("sync status failed", err).ToAPIResponse()
+	}
+
+	if record == nil {
+		resp, _ := api.SuccessJSON(api.SyncStatusResponse{HasData: false})
+		return http.StatusOK, resp
+	}
+
+	resp, _ := api.SuccessJSON(api.SyncStatusResponse{
+		HasData:   true,
+		Version:   record.Version,
+		SizeBytes: record.SizeBytes,
+		Checksum:  record.Checksum,
+		DeviceID:  record.DeviceID,
+		UpdatedAt: record.UpdatedAt,
+	})
 	return http.StatusOK, resp
 }
 

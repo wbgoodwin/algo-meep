@@ -27,6 +27,7 @@ ApiStack(
     sync_table_arn=data_stack.sync_table.table_arn,
     usage_table_arn=data_stack.usage_table.table_arn,
     sync_bucket_arn=data_stack.sync_bucket.bucket_arn,
+    sync_bucket_name=data_stack.sync_bucket.bucket_name,
     token_encryption_key_arn=data_stack.token_encryption_key.key_arn,
     env=env,
 )
