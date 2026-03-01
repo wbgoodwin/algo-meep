@@ -83,3 +83,8 @@ cdk.out/**/*
 
 # Response file from test lambda
 response.json
+
+.claude/
+.claude-flow/
+CLAUDE.md
+.mcp.json

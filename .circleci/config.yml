@@ -1,0 +1,84 @@
+version: 2.1
+
+orbs:
+  go: circleci/go@1.11.0
+
+jobs:
+  backend-test:
+    docker:
+      - image: cimg/go:1.25
+    working_directory: ~/project/backend
+    steps:
+      - checkout:
+          path: ~/project
+      - go/load-cache
+      - go/mod-download
+      - go/save-cache
+      - run:
+          name: Run unit tests
+          command: go test ./... -v -count=1 -race -timeout 5m
+      - run:
+          name: Run coverage
+          command: |
+            go test ./... -coverprofile=coverage.out -count=1
+            go tool cover -func=coverage.out
+            go tool cover -func=coverage.out | tail -1
+      - run:
+          name: Enforce coverage threshold (90%)
+          command: |
+            TOTAL=$(go tool cover -func=coverage.out | tail -1 | awk '{print $NF}' | tr -d '%')
+            echo "Total coverage: ${TOTAL}%"
+            if [ "$(echo "${TOTAL} < 90.0" | bc -l)" -eq 1 ]; then
+              echo "FAIL: Coverage ${TOTAL}% is below 90% threshold"
+              exit 1
+            fi
+            echo "PASS: Coverage ${TOTAL}% meets 90% threshold"
+      - store_artifacts:
+          path: coverage.out
+          destination: coverage/coverage.out
+      - run:
+          name: Generate HTML coverage report
+          command: go tool cover -html=coverage.out -o coverage.html
+      - store_artifacts:
+          path: coverage.html
+          destination: coverage/coverage.html
+
+  backend-build:
+    docker:
+      - image: cimg/go:1.25
+    working_directory: ~/project/backend
+    steps:
+      - checkout:
+          path: ~/project
+      - go/load-cache
+      - go/mod-download
+      - go/save-cache
+      - run:
+          name: Build for Linux ARM64 (Lambda target)
+          command: GOOS=linux GOARCH=arm64 go build -o build/api/bootstrap ./cmd/api
+      - run:
+          name: Verify binary
+          command: file build/api/bootstrap
+
+  backend-lint:
+    docker:
+      - image: cimg/go:1.25
+    working_directory: ~/project/backend
+    steps:
+      - checkout:
+          path: ~/project
+      - run:
+          name: Install golangci-lint
+          command: curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.62.2
+      - run:
+          name: Run linter
+          command: golangci-lint run ./...
+
+workflows:
+  backend:
+    jobs:
+      - backend-lint
+      - backend-test
+      - backend-build:
+          requires:
+            - backend-test
