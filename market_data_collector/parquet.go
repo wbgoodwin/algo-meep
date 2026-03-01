@@ -23,7 +23,7 @@ func barsToParquet(bars []marketdata.Bar, symbol string) ([]byte, error) {
 	for _, bar := range bars {
 		pb := ParquetBar{
 			Symbol:     symbol,
-			Timestamp:  bar.Timestamp.UnixMilli(), // Use milliseconds for better precision
+			Timestamp:  bar.Timestamp.Unix(), // Use seconds for Athena compatibility
 			Open:       bar.Open,
 			High:       bar.High,
 			Low:        bar.Low,
@@ -59,7 +59,7 @@ func newsToParquet(news []marketdata.News, sentiment govader.Sentiment, symbol s
 		itemSentiment := analyzer.PolarityScores(newsItem.Headline + " " + newsItem.Summary)
 		pn := ParquetNews{
 			Symbol:    symbol,
-			Timestamp: newsItem.CreatedAt.UnixMilli(), // Use milliseconds for better precision
+			Timestamp: newsItem.CreatedAt.Unix(), // Use seconds for Athena compatibility
 			Headline:  newsItem.Headline,
 			Summary:   newsItem.Summary,
 			Positive:  itemSentiment.Positive,
