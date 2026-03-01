@@ -168,7 +168,7 @@ func TestTellerProvider_GetAccounts_Success(t *testing.T) {
 			},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(accounts)
+		_ = json.NewEncoder(w).Encode(accounts)
 	}))
 	defer server.Close()
 
@@ -197,7 +197,7 @@ func TestTellerProvider_GetAccounts_Success(t *testing.T) {
 func TestTellerProvider_GetAccounts_ServerError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(`{"error":"internal server error"}`))
+		_, _ = w.Write([]byte(`{"error":"internal server error"}`))
 	}))
 	defer server.Close()
 
@@ -210,7 +210,7 @@ func TestTellerProvider_GetAccounts_ServerError(t *testing.T) {
 
 func TestTellerProvider_GetAccounts_InvalidJSON(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`not json`))
+		_, _ = w.Write([]byte(`not json`))
 	}))
 	defer server.Close()
 
@@ -277,7 +277,7 @@ func TestTellerProvider_SyncTransactions_Success(t *testing.T) {
 			},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(txns)
+		_ = json.NewEncoder(w).Encode(txns)
 	}))
 	defer server.Close()
 
@@ -316,7 +316,7 @@ func TestTellerProvider_SyncTransactions_WithCursor(t *testing.T) {
 			t.Errorf("expected from_id=cursor_abc, got %s", fromID)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]tellerTransaction{})
+		_ = json.NewEncoder(w).Encode([]tellerTransaction{})
 	}))
 	defer server.Close()
 
@@ -336,7 +336,7 @@ func TestTellerProvider_SyncTransactions_WithCursor(t *testing.T) {
 func TestTellerProvider_SyncTransactions_ServerError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
-		w.Write([]byte(`{"error":"forbidden"}`))
+		_, _ = w.Write([]byte(`{"error":"forbidden"}`))
 	}))
 	defer server.Close()
 
@@ -352,7 +352,7 @@ func TestTellerProvider_SyncTransactions_ServerError(t *testing.T) {
 
 func TestTellerProvider_SyncTransactions_InvalidJSON(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{broken`))
+		_, _ = w.Write([]byte(`{broken`))
 	}))
 	defer server.Close()
 
@@ -393,7 +393,7 @@ func TestTellerProvider_GetInstitutions_Success(t *testing.T) {
 			{ID: "bofa", Name: "Bank of America"},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(insts)
+		_ = json.NewEncoder(w).Encode(insts)
 	}))
 	defer server.Close()
 
@@ -416,7 +416,7 @@ func TestTellerProvider_GetInstitutions_Success(t *testing.T) {
 func TestTellerProvider_GetInstitutions_ServerError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte(`service down`))
+		_, _ = w.Write([]byte(`service down`))
 	}))
 	defer server.Close()
 
@@ -429,7 +429,7 @@ func TestTellerProvider_GetInstitutions_ServerError(t *testing.T) {
 
 func TestTellerProvider_GetInstitutions_InvalidJSON(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`not json at all`))
+		_, _ = w.Write([]byte(`not json at all`))
 	}))
 	defer server.Close()
 
@@ -453,7 +453,7 @@ func TestTellerProvider_GetInstitutions_ConnectionError(t *testing.T) {
 func TestTellerProvider_GetAccounts_Empty(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]tellerAccount{})
+		_ = json.NewEncoder(w).Encode([]tellerAccount{})
 	}))
 	defer server.Close()
 

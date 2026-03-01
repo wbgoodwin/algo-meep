@@ -91,7 +91,7 @@ func (t *TellerProvider) GetAccounts(credential AccessCredential) ([]Account, er
 	if err != nil {
 		return nil, fmt.Errorf("teller accounts request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -106,13 +106,13 @@ func (t *TellerProvider) GetAccounts(credential AccessCredential) ([]Account, er
 	accounts := make([]Account, len(tellerAccounts))
 	for i, ta := range tellerAccounts {
 		accounts[i] = Account{
-			ID:              ta.ID,
-			InstitutionID:   ta.Institution.ID,
-			Name:            ta.Name,
-			Type:            ta.Type,
-			Subtype:         ta.Subtype,
-			CurrencyCode:    ta.Currency,
-			LastUpdated:      ta.LastFour, // placeholder — Teller doesn't have a direct "last_updated"
+			ID:            ta.ID,
+			InstitutionID: ta.Institution.ID,
+			Name:          ta.Name,
+			Type:          ta.Type,
+			Subtype:       ta.Subtype,
+			CurrencyCode:  ta.Currency,
+			LastUpdated:   ta.LastFour, // placeholder — Teller doesn't have a direct "last_updated"
 		}
 	}
 	return accounts, nil
@@ -136,7 +136,7 @@ func (t *TellerProvider) SyncTransactions(credential AccessCredential, cursor st
 	if err != nil {
 		return nil, fmt.Errorf("teller transactions request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -186,7 +186,7 @@ func (t *TellerProvider) GetInstitutions() ([]Institution, error) {
 	if err != nil {
 		return nil, fmt.Errorf("teller institutions request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
