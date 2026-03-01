@@ -2,6 +2,8 @@ package sync
 
 import (
 	"context"
+	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -37,7 +39,6 @@ func (m *mockDynamoDB) GetItem(ctx context.Context, params *dynamodb.GetItemInpu
 
 type mockS3 struct {
 	putObjectFn func(ctx context.Context, params *s3.PutObjectInput, optFns ...func(*s3.Options)) (*s3.PutObjectOutput, error)
-	getObjectFn func(ctx context.Context, params *s3.GetObjectInput, optFns ...func(*s3.Options)) (*s3.GetObjectOutput, error)
 }
 
 func (m *mockS3) PutObject(ctx context.Context, params *s3.PutObjectInput, optFns ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
@@ -47,20 +48,13 @@ func (m *mockS3) PutObject(ctx context.Context, params *s3.PutObjectInput, optFn
 	return &s3.PutObjectOutput{}, nil
 }
 
-func (m *mockS3) GetObject(ctx context.Context, params *s3.GetObjectInput, optFns ...func(*s3.Options)) (*s3.GetObjectOutput, error) {
-	if m.getObjectFn != nil {
-		return m.getObjectFn(ctx, params, optFns...)
-	}
-	return &s3.GetObjectOutput{}, nil
-}
-
 type mockPresigner struct {
-	presignGetObjectFn func(ctx context.Context, userID, bucket, key string, expires time.Duration) (string, error)
+	presignGetObjectFn func(ctx context.Context, bucket, key string, expires time.Duration) (string, error)
 }
 
-func (m *mockPresigner) PresignGetObject(ctx context.Context, userID, bucket, key string, expires time.Duration) (string, error) {
+func (m *mockPresigner) PresignGetObject(ctx context.Context, bucket, key string, expires time.Duration) (string, error) {
 	if m.presignGetObjectFn != nil {
-		return m.presignGetObjectFn(ctx, userID, bucket, key, expires)
+		return m.presignGetObjectFn(ctx, bucket, key, expires)
 	}
 	return "https://s3.example.com/presigned", nil
 }
@@ -275,6 +269,48 @@ func TestPush_DynamoError(t *testing.T) {
 	}
 }
 
+func TestPush_VersionConflict(t *testing.T) {
+	db := &mockDynamoDB{
+		getItemFn: func(_ context.Context, _ *dynamodb.GetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+			return &dynamodb.GetItemOutput{
+				Item: makeSyncItem("user-1", 5, 512, "old", "device-b"),
+			}, nil
+		},
+		putItemFn: func(_ context.Context, _ *dynamodb.PutItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error) {
+			return nil, &dbtypes.ConditionalCheckFailedException{Message: stringPtr("condition not met")}
+		},
+	}
+	s3c := &mockS3{}
+
+	svc := newTestService(db, s3c, &mockPresigner{})
+	_, err := svc.Push(context.Background(), "user-1", strings.NewReader("data"), 4, "sha256:x", "d")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ErrVersionConflict) {
+		t.Errorf("expected ErrVersionConflict, got: %v", err)
+	}
+}
+
+func TestPush_DynamoReadError(t *testing.T) {
+	db := &mockDynamoDB{
+		getItemFn: func(_ context.Context, _ *dynamodb.GetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+			return nil, fmt.Errorf("dynamo unavailable")
+		},
+	}
+
+	svc := newTestService(db, &mockS3{}, &mockPresigner{})
+	_, err := svc.Push(context.Background(), "user-1", strings.NewReader("data"), 4, "sha256:x", "d")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "get current version") {
+		t.Errorf("expected get current version error, got: %v", err)
+	}
+}
+
+func stringPtr(s string) *string { return &s }
+
 func TestPull_Success(t *testing.T) {
 	db := &mockDynamoDB{
 		getItemFn: func(_ context.Context, _ *dynamodb.GetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
@@ -284,7 +320,7 @@ func TestPull_Success(t *testing.T) {
 		},
 	}
 	presigner := &mockPresigner{
-		presignGetObjectFn: func(_ context.Context, _, bucket, key string, _ time.Duration) (string, error) {
+		presignGetObjectFn: func(_ context.Context, bucket, key string, _ time.Duration) (string, error) {
 			if key != "sync/user-1/db.enc" {
 				t.Errorf("unexpected key: %s", key)
 			}
@@ -341,7 +377,7 @@ func TestPull_PresignError(t *testing.T) {
 		},
 	}
 	presigner := &mockPresigner{
-		presignGetObjectFn: func(_ context.Context, _, _, _ string, _ time.Duration) (string, error) {
+		presignGetObjectFn: func(_ context.Context, _, _ string, _ time.Duration) (string, error) {
 			return "", fmt.Errorf("presign failed")
 		},
 	}
@@ -364,12 +400,31 @@ func TestS3Key(t *testing.T) {
 }
 
 func TestParsePushBody(t *testing.T) {
-	reader := ParsePushBody("hello world")
-	data, err := io.ReadAll(reader)
+	original := "hello world"
+	encoded := base64.StdEncoding.EncodeToString([]byte(original))
+
+	reader, size, err := ParsePushBody(encoded)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if string(data) != "hello world" {
-		t.Errorf("unexpected data: %s", string(data))
+	if size != int64(len(original)) {
+		t.Errorf("expected size %d, got %d", len(original), size)
+	}
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("unexpected read error: %v", err)
+	}
+	if string(data) != original {
+		t.Errorf("expected %q, got %q", original, string(data))
+	}
+}
+
+func TestParsePushBody_InvalidBase64(t *testing.T) {
+	_, _, err := ParsePushBody("not valid base64!!!")
+	if err == nil {
+		t.Fatal("expected error for invalid base64, got nil")
+	}
+	if !strings.Contains(err.Error(), "base64 decode") {
+		t.Errorf("unexpected error: %v", err)
 	}
 }

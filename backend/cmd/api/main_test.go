@@ -1206,7 +1206,6 @@ func (m *mockSyncDynamo) GetItem(ctx context.Context, params *dynamodb.GetItemIn
 
 type mockSyncS3 struct {
 	putObjectFn func(ctx context.Context, params *s3.PutObjectInput, optFns ...func(*s3.Options)) (*s3.PutObjectOutput, error)
-	getObjectFn func(ctx context.Context, params *s3.GetObjectInput, optFns ...func(*s3.Options)) (*s3.GetObjectOutput, error)
 }
 
 func (m *mockSyncS3) PutObject(ctx context.Context, params *s3.PutObjectInput, optFns ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
@@ -1216,19 +1215,12 @@ func (m *mockSyncS3) PutObject(ctx context.Context, params *s3.PutObjectInput, o
 	return &s3.PutObjectOutput{}, nil
 }
 
-func (m *mockSyncS3) GetObject(ctx context.Context, params *s3.GetObjectInput, optFns ...func(*s3.Options)) (*s3.GetObjectOutput, error) {
-	if m.getObjectFn != nil {
-		return m.getObjectFn(ctx, params, optFns...)
-	}
-	return &s3.GetObjectOutput{}, nil
-}
-
 type mockSyncPresigner struct {
 	url string
 	err error
 }
 
-func (m *mockSyncPresigner) PresignGetObject(_ context.Context, _, _, _ string, _ time.Duration) (string, error) {
+func (m *mockSyncPresigner) PresignGetObject(_ context.Context, _, _ string, _ time.Duration) (string, error) {
 	if m.err != nil {
 		return "", m.err
 	}
@@ -1352,7 +1344,7 @@ func TestHandler_SyncPush_S3Error(t *testing.T) {
 	}
 	a := newTestAppWithSync(syncDB, syncS3, &mockSyncPresigner{})
 
-	body := `{"data":"blob","checksum":"sha256:abc","device_id":"d"}`
+	body := `{"data":"ZW5jcnlwdGVk","checksum":"sha256:abc","device_id":"d"}`
 	resp, _ := a.Handler(context.Background(), makeAuthRequest("POST /sync/push", body))
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d: %s", resp.StatusCode, resp.Body)
@@ -1361,7 +1353,7 @@ func TestHandler_SyncPush_S3Error(t *testing.T) {
 
 func TestHandler_SyncPush_NoSyncService(t *testing.T) {
 	a := newTestApp() // no sync service
-	body := `{"data":"blob","checksum":"sha256:abc","device_id":"d"}`
+	body := `{"data":"ZW5jcnlwdGVk","checksum":"sha256:abc","device_id":"d"}`
 	resp, _ := a.Handler(context.Background(), makeAuthRequest("POST /sync/push", body))
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d: %s", resp.StatusCode, resp.Body)
@@ -1523,6 +1515,41 @@ func TestHandler_SyncStatus_DynamoError(t *testing.T) {
 	resp, _ := a.Handler(context.Background(), makeAuthRequest("GET /sync/status", ""))
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d: %s", resp.StatusCode, resp.Body)
+	}
+}
+
+func TestHandler_SyncPush_InvalidBase64(t *testing.T) {
+	syncDB := &mockSyncDynamo{
+		getItemFn: func(_ context.Context, _ *dynamodb.GetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+			return &dynamodb.GetItemOutput{Item: nil}, nil
+		},
+	}
+	a := newTestAppWithSync(syncDB, &mockSyncS3{}, &mockSyncPresigner{})
+
+	body := `{"data":"not!valid!base64!!!","checksum":"sha256:abc","device_id":"d"}`
+	resp, _ := a.Handler(context.Background(), makeAuthRequest("POST /sync/push", body))
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", resp.StatusCode, resp.Body)
+	}
+}
+
+func TestHandler_SyncPush_VersionConflict(t *testing.T) {
+	syncDB := &mockSyncDynamo{
+		getItemFn: func(_ context.Context, _ *dynamodb.GetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+			return &dynamodb.GetItemOutput{
+				Item: makeSyncItem("user-123", 5, 512, "old", "device-b"),
+			}, nil
+		},
+		putItemFn: func(_ context.Context, _ *dynamodb.PutItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error) {
+			return nil, &dbtypes.ConditionalCheckFailedException{Message: aws.String("condition not met")}
+		},
+	}
+	a := newTestAppWithSync(syncDB, &mockSyncS3{}, &mockSyncPresigner{})
+
+	body := `{"data":"ZW5jcnlwdGVk","checksum":"sha256:abc","device_id":"d"}`
+	resp, _ := a.Handler(context.Background(), makeAuthRequest("POST /sync/push", body))
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", resp.StatusCode, resp.Body)
 	}
 }
 

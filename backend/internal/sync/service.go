@@ -1,10 +1,12 @@
 package sync
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
-	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -13,6 +15,9 @@ import (
 	dbtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
+
+// ErrVersionConflict is returned when a concurrent push has already incremented the version.
+var ErrVersionConflict = errors.New("sync version conflict: retry push")
 
 const syncTable = "algoflow-sync"
 
@@ -25,12 +30,11 @@ type DynamoDBClient interface {
 // S3Client defines the subset of S3 operations used by the sync service.
 type S3Client interface {
 	PutObject(ctx context.Context, params *s3.PutObjectInput, optFns ...func(*s3.Options)) (*s3.PutObjectOutput, error)
-	GetObject(ctx context.Context, params *s3.GetObjectInput, optFns ...func(*s3.Options)) (*s3.GetObjectOutput, error)
 }
 
 // S3PresignClient defines the presign operations used for generating download URLs.
 type S3PresignClient interface {
-	PresignGetObject(ctx context.Context, userID, bucket, key string, expires time.Duration) (string, error)
+	PresignGetObject(ctx context.Context, bucket, key string, expires time.Duration) (string, error)
 }
 
 // Service handles encrypted database sync via S3 + DynamoDB metadata.
@@ -46,7 +50,7 @@ type s3Presigner struct {
 	client *s3.PresignClient
 }
 
-func (p *s3Presigner) PresignGetObject(ctx context.Context, _, bucket, key string, expires time.Duration) (string, error) {
+func (p *s3Presigner) PresignGetObject(ctx context.Context, bucket, key string, expires time.Duration) (string, error) {
 	resp, err := p.client.PresignGetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
@@ -97,11 +101,24 @@ func s3Key(userID string) string {
 }
 
 // Push uploads an encrypted database blob to S3 and updates DynamoDB metadata.
+// Uses optimistic concurrency: reads the current version, uploads to S3, then
+// conditionally writes metadata only if the version hasn't changed.
+// Returns ErrVersionConflict if a concurrent push won the race.
 func (s *Service) Push(ctx context.Context, userID string, data io.Reader, sizeBytes int64, checksum, deviceID string) (*SyncRecord, error) {
 	key := s3Key(userID)
 
-	// Upload to S3
-	_, err := s.s3Client.PutObject(ctx, &s3.PutObjectInput{
+	// 1. Read current version BEFORE uploading (fail fast if DynamoDB is down)
+	currentVersion := 0
+	existing, err := s.GetStatus(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("get current version: %w", err)
+	}
+	if existing != nil {
+		currentVersion = existing.Version
+	}
+
+	// 2. Upload blob to S3
+	_, err = s.s3Client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:        aws.String(s.bucket),
 		Key:           aws.String(key),
 		Body:          data,
@@ -116,13 +133,7 @@ func (s *Service) Push(ctx context.Context, userID string, data io.Reader, sizeB
 		return nil, fmt.Errorf("s3 put object: %w", err)
 	}
 
-	// Get current version (if any) to increment
-	currentVersion := 0
-	existing, err := s.GetStatus(ctx, userID)
-	if err == nil && existing != nil {
-		currentVersion = existing.Version
-	}
-
+	// 3. Conditional write — only succeed if version hasn't changed since step 1
 	record := SyncRecord{
 		PK:        fmt.Sprintf("USER#%s", userID),
 		SK:        "SYNC",
@@ -138,11 +149,29 @@ func (s *Service) Push(ctx context.Context, userID string, data io.Reader, sizeB
 		return nil, fmt.Errorf("marshal sync record: %w", err)
 	}
 
-	_, err = s.db.PutItem(ctx, &dynamodb.PutItemInput{
+	putInput := &dynamodb.PutItemInput{
 		TableName: aws.String(syncTable),
 		Item:      item,
-	})
+	}
+
+	if currentVersion == 0 {
+		// First push — item must not exist yet
+		putInput.ConditionExpression = aws.String("attribute_not_exists(PK)")
+	} else {
+		// Subsequent push — version must match what we read
+		putInput.ConditionExpression = aws.String("version = :expected")
+		putInput.ExpressionAttributeValues = map[string]dbtypes.AttributeValue{
+			":expected": &dbtypes.AttributeValueMemberN{Value: fmt.Sprintf("%d", currentVersion)},
+		}
+	}
+
+	_, err = s.db.PutItem(ctx, putInput)
 	if err != nil {
+		// Check for conditional check failure (version conflict)
+		var condErr *dbtypes.ConditionalCheckFailedException
+		if errors.As(err, &condErr) {
+			return nil, ErrVersionConflict
+		}
 		return nil, fmt.Errorf("put sync metadata: %w", err)
 	}
 
@@ -161,7 +190,7 @@ func (s *Service) Pull(ctx context.Context, userID string) (string, *SyncRecord,
 	}
 
 	key := s3Key(userID)
-	url, err := s.presigner.PresignGetObject(ctx, userID, s.bucket, key, 15*time.Minute)
+	url, err := s.presigner.PresignGetObject(ctx, s.bucket, key, 15*time.Minute)
 	if err != nil {
 		return "", nil, fmt.Errorf("presign get object: %w", err)
 	}
@@ -193,9 +222,12 @@ func (s *Service) GetStatus(ctx context.Context, userID string) (*SyncRecord, er
 	return &record, nil
 }
 
-// ParsePushBody parses the base64-encoded body from a push request.
-// The client sends the encrypted blob as the raw body with metadata in headers/query params.
-// For Lambda, we receive the body as a string (possibly base64-encoded by API Gateway).
-func ParsePushBody(body string) io.Reader {
-	return strings.NewReader(body)
+// ParsePushBody decodes a base64-encoded push body and returns the raw bytes
+// and their decoded size. Returns the decoded reader and byte count.
+func ParsePushBody(body string) (io.Reader, int64, error) {
+	decoded, err := base64.StdEncoding.DecodeString(body)
+	if err != nil {
+		return nil, 0, fmt.Errorf("base64 decode: %w", err)
+	}
+	return bytes.NewReader(decoded), int64(len(decoded)), nil
 }

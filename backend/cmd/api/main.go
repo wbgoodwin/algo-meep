@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -633,11 +634,16 @@ func (a *App) handleSyncPush(ctx context.Context, req events.APIGatewayV2HTTPReq
 		return api.NewBadRequest("device_id is required").ToAPIResponse()
 	}
 
-	reader := syncpkg.ParsePushBody(input.Data)
-	sizeBytes := int64(len(input.Data))
+	reader, sizeBytes, err := syncpkg.ParsePushBody(input.Data)
+	if err != nil {
+		return api.NewBadRequest("invalid base64 data").ToAPIResponse()
+	}
 
 	record, err := a.SyncService.Push(ctx, userID, reader, sizeBytes, input.Checksum, input.DeviceID)
 	if err != nil {
+		if errors.Is(err, syncpkg.ErrVersionConflict) {
+			return api.NewConflict("sync version conflict — retry push").ToAPIResponse()
+		}
 		a.Log.Error("Sync push failed", err, middleware.WithUserID(userID))
 		return api.NewInternal("sync push failed", err).ToAPIResponse()
 	}
