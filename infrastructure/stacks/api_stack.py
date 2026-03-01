@@ -109,6 +109,7 @@ class ApiStack(Stack):
                             actions=[
                                 "cognito-idp:SignUp",
                                 "cognito-idp:InitiateAuth",
+                                "cognito-idp:GetUser",
                                 "cognito-idp:DeleteUser",
                             ],
                             resources=[user_pool.user_pool_arn],
@@ -254,4 +255,4 @@ class ApiStack(Stack):
         if os.getenv("ENVIRONMENT") == "local":
             return _lambda.Code.from_asset("../backend/build/api/bootstrap.zip")
         else:
-            return _lambda.Code.from_asset("./infrastructure/cdk.out/api-bootstrap.zip")
+            return _lambda.Code.from_asset("./cdk.out/api-bootstrap.zip")
