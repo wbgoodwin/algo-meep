@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -72,7 +71,7 @@ func init() {
 	if tellerAPIKey != "" {
 		baseURL := "https://api.teller.io"
 		if tellerEnv == "sandbox" {
-			baseURL = "https://api.teller.io"
+			baseURL = "https://api.sandbox.teller.io"
 		}
 		tp, err := provider.NewTellerProvider(provider.TellerConfig{
 			APIKey:  tellerAPIKey,
@@ -169,7 +168,7 @@ func (a *App) Handler(ctx context.Context, req events.APIGatewayV2HTTPRequest) (
 		statusCode, body = a.withAuth(req, func(userID string) (int, []byte) {
 			return a.handleBankExchangeToken(ctx, req, userID)
 		})
-	case "GET /bank/accounts":
+	case "POST /bank/accounts":
 		statusCode, body = a.withAuth(req, func(userID string) (int, []byte) {
 			return a.handleBankAccounts(ctx, req, userID)
 		})
@@ -261,10 +260,16 @@ func (a *App) handleLogin(ctx context.Context, req events.APIGatewayV2HTTPReques
 		return api.NewInternal("login failed", err).ToAPIResponse()
 	}
 
-	// Ensure DynamoDB user profile exists (created on first login)
-	if sub := extractSubFromJWT(tokens.AccessToken); sub != "" {
-		existing, _ := a.UserService.GetUser(ctx, sub)
-		if existing == nil {
+	// Ensure DynamoDB user profile exists (created on first login).
+	// Use Cognito GetUser for server-side token validation instead of raw JWT parsing.
+	sub, subErr := a.AuthService.GetSubFromAccessToken(ctx, tokens.AccessToken)
+	if subErr != nil {
+		a.Log.Error("Failed to get sub from access token", subErr)
+	} else if sub != "" {
+		existing, getErr := a.UserService.GetUser(ctx, sub)
+		if getErr != nil {
+			a.Log.Error("Failed to check user profile on login", getErr, middleware.WithUserID(sub))
+		} else if existing == nil {
 			if createErr := a.UserService.CreateUser(ctx, sub, input.Email); createErr != nil {
 				a.Log.Error("Failed to create user profile on first login", createErr,
 					middleware.WithField("email_domain", emailDomain(input.Email)))
@@ -445,9 +450,7 @@ func (a *App) handleBankExchangeToken(ctx context.Context, req events.APIGateway
 func (a *App) handleBankAccounts(ctx context.Context, req events.APIGatewayV2HTTPRequest, userID string) (int, []byte) {
 	var input api.AccountsRequest
 	if err := json.Unmarshal([]byte(req.Body), &input); err != nil {
-		// Try query params for GET
-		input.EncryptedAccessToken = req.QueryStringParameters["access_token"]
-		input.Provider = req.QueryStringParameters["provider"]
+		return api.NewBadRequest("invalid request body").ToAPIResponse()
 	}
 
 	p := a.ProviderReg.Get(input.Provider)
@@ -583,30 +586,11 @@ func (a *App) handleBankProviders() (int, []byte) {
 	return http.StatusOK, resp
 }
 
-// extractSubFromJWT decodes the JWT payload (middle segment) to extract the "sub" claim.
-func extractSubFromJWT(token string) string {
-	parts := strings.SplitN(token, ".", 3)
-	if len(parts) != 3 {
-		return ""
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return ""
-	}
-	var claims struct {
-		Sub string `json:"sub"`
-	}
-	if err := json.Unmarshal(payload, &claims); err != nil {
-		return ""
-	}
-	return claims.Sub
-}
-
 // isAllowedIP checks if the source IP is in the allowlist.
-// If the allowlist is empty (ALLOWED_IPS not set), all IPs are allowed.
+// Fail-closed: if ALLOWED_IPS is not set, no IPs are allowed.
 func (a *App) isAllowedIP(ip string) bool {
 	if len(a.AllowedIPs) == 0 {
-		return true
+		return false
 	}
 	return a.AllowedIPs[ip]
 }

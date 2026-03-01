@@ -16,6 +16,7 @@ type mockCognitoClient struct {
 	signUpFn       func(ctx context.Context, params *cognitoidentityprovider.SignUpInput, optFns ...func(*cognitoidentityprovider.Options)) (*cognitoidentityprovider.SignUpOutput, error)
 	initiateAuthFn func(ctx context.Context, params *cognitoidentityprovider.InitiateAuthInput, optFns ...func(*cognitoidentityprovider.Options)) (*cognitoidentityprovider.InitiateAuthOutput, error)
 	deleteUserFn   func(ctx context.Context, params *cognitoidentityprovider.DeleteUserInput, optFns ...func(*cognitoidentityprovider.Options)) (*cognitoidentityprovider.DeleteUserOutput, error)
+	getUserFn      func(ctx context.Context, params *cognitoidentityprovider.GetUserInput, optFns ...func(*cognitoidentityprovider.Options)) (*cognitoidentityprovider.GetUserOutput, error)
 }
 
 func (m *mockCognitoClient) SignUp(ctx context.Context, params *cognitoidentityprovider.SignUpInput, optFns ...func(*cognitoidentityprovider.Options)) (*cognitoidentityprovider.SignUpOutput, error) {
@@ -28,6 +29,13 @@ func (m *mockCognitoClient) InitiateAuth(ctx context.Context, params *cognitoide
 
 func (m *mockCognitoClient) DeleteUser(ctx context.Context, params *cognitoidentityprovider.DeleteUserInput, optFns ...func(*cognitoidentityprovider.Options)) (*cognitoidentityprovider.DeleteUserOutput, error) {
 	return m.deleteUserFn(ctx, params, optFns...)
+}
+
+func (m *mockCognitoClient) GetUser(ctx context.Context, params *cognitoidentityprovider.GetUserInput, optFns ...func(*cognitoidentityprovider.Options)) (*cognitoidentityprovider.GetUserOutput, error) {
+	if m.getUserFn != nil {
+		return m.getUserFn(ctx, params, optFns...)
+	}
+	return &cognitoidentityprovider.GetUserOutput{Username: aws.String("user-sub-123")}, nil
 }
 
 func newTestService(mock *mockCognitoClient) *Service {
@@ -352,6 +360,56 @@ func TestDeleteUser_Error(t *testing.T) {
 	}
 	if !contains(err.Error(), "cognito delete user") {
 		t.Errorf("expected wrapped error, got: %v", err)
+	}
+}
+
+// --- GetSubFromAccessToken tests ---
+
+func TestGetSubFromAccessToken_Success(t *testing.T) {
+	mock := &mockCognitoClient{
+		getUserFn: func(ctx context.Context, params *cognitoidentityprovider.GetUserInput, optFns ...func(*cognitoidentityprovider.Options)) (*cognitoidentityprovider.GetUserOutput, error) {
+			if *params.AccessToken != "valid-token" {
+				t.Errorf("expected access token 'valid-token', got '%s'", *params.AccessToken)
+			}
+			return &cognitoidentityprovider.GetUserOutput{Username: aws.String("user-sub-abc")}, nil
+		},
+	}
+	svc := newTestService(mock)
+	sub, err := svc.GetSubFromAccessToken(context.Background(), "valid-token")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sub != "user-sub-abc" {
+		t.Errorf("expected 'user-sub-abc', got '%s'", sub)
+	}
+}
+
+func TestGetSubFromAccessToken_CognitoError(t *testing.T) {
+	mock := &mockCognitoClient{
+		getUserFn: func(ctx context.Context, params *cognitoidentityprovider.GetUserInput, optFns ...func(*cognitoidentityprovider.Options)) (*cognitoidentityprovider.GetUserOutput, error) {
+			return nil, fmt.Errorf("token expired")
+		},
+	}
+	svc := newTestService(mock)
+	_, err := svc.GetSubFromAccessToken(context.Background(), "expired-token")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !contains(err.Error(), "cognito get user") {
+		t.Errorf("expected wrapped error, got: %v", err)
+	}
+}
+
+func TestGetSubFromAccessToken_EmptyUsername(t *testing.T) {
+	mock := &mockCognitoClient{
+		getUserFn: func(ctx context.Context, params *cognitoidentityprovider.GetUserInput, optFns ...func(*cognitoidentityprovider.Options)) (*cognitoidentityprovider.GetUserOutput, error) {
+			return &cognitoidentityprovider.GetUserOutput{Username: aws.String("")}, nil
+		},
+	}
+	svc := newTestService(mock)
+	_, err := svc.GetSubFromAccessToken(context.Background(), "token")
+	if err == nil {
+		t.Fatal("expected error for empty username")
 	}
 }
 

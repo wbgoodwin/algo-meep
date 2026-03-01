@@ -35,6 +35,7 @@ type mockCognito struct {
 	signUpFn       func(ctx context.Context, params *cognitoidentityprovider.SignUpInput, optFns ...func(*cognitoidentityprovider.Options)) (*cognitoidentityprovider.SignUpOutput, error)
 	initiateAuthFn func(ctx context.Context, params *cognitoidentityprovider.InitiateAuthInput, optFns ...func(*cognitoidentityprovider.Options)) (*cognitoidentityprovider.InitiateAuthOutput, error)
 	deleteUserFn   func(ctx context.Context, params *cognitoidentityprovider.DeleteUserInput, optFns ...func(*cognitoidentityprovider.Options)) (*cognitoidentityprovider.DeleteUserOutput, error)
+	getUserFn      func(ctx context.Context, params *cognitoidentityprovider.GetUserInput, optFns ...func(*cognitoidentityprovider.Options)) (*cognitoidentityprovider.GetUserOutput, error)
 }
 
 func (m *mockCognito) SignUp(ctx context.Context, params *cognitoidentityprovider.SignUpInput, optFns ...func(*cognitoidentityprovider.Options)) (*cognitoidentityprovider.SignUpOutput, error) {
@@ -56,6 +57,13 @@ func (m *mockCognito) DeleteUser(ctx context.Context, params *cognitoidentitypro
 		return m.deleteUserFn(ctx, params, optFns...)
 	}
 	return &cognitoidentityprovider.DeleteUserOutput{}, nil
+}
+
+func (m *mockCognito) GetUser(ctx context.Context, params *cognitoidentityprovider.GetUserInput, optFns ...func(*cognitoidentityprovider.Options)) (*cognitoidentityprovider.GetUserOutput, error) {
+	if m.getUserFn != nil {
+		return m.getUserFn(ctx, params, optFns...)
+	}
+	return &cognitoidentityprovider.GetUserOutput{Username: aws.String("user-sub-123")}, nil
 }
 
 // --- Mock DynamoDB ---
@@ -196,7 +204,7 @@ func newTestAppWithMocks(cognito *mockCognito, dynamo *mockDynamo) *App {
 		AuthService:    auth.NewServiceWithClient(cognito, "test-pool", "test-client"),
 		UserService:    user.NewServiceWithClient(dynamo),
 		ProviderReg:    reg,
-		AllowedIPs:     map[string]bool{},
+		AllowedIPs:     map[string]bool{"1.2.3.4": true},
 		TokenEncryptor: crypto.NewTokenEncryptor(&mockKMS{}, "test-key"),
 	}
 }
@@ -265,50 +273,10 @@ func makeJWT(sub string) string {
 // Unit tests for helper functions
 // ============================================================
 
-func TestExtractSubFromJWT_Valid(t *testing.T) {
-	token := makeJWT("user-abc-123")
-	sub := extractSubFromJWT(token)
-	if sub != "user-abc-123" {
-		t.Errorf("expected user-abc-123, got %s", sub)
-	}
-}
-
-func TestExtractSubFromJWT_InvalidFormat(t *testing.T) {
-	if extractSubFromJWT("not-a-jwt") != "" {
-		t.Error("expected empty for non-JWT")
-	}
-	if extractSubFromJWT("a.b") != "" {
-		t.Error("expected empty for two-part string")
-	}
-	if extractSubFromJWT("") != "" {
-		t.Error("expected empty for empty string")
-	}
-}
-
-func TestExtractSubFromJWT_InvalidBase64(t *testing.T) {
-	if extractSubFromJWT("a.!!!invalid!!!.c") != "" {
-		t.Error("expected empty for invalid base64 payload")
-	}
-}
-
-func TestExtractSubFromJWT_InvalidJSON(t *testing.T) {
-	payload := base64.RawURLEncoding.EncodeToString([]byte(`not json`))
-	if extractSubFromJWT("a."+payload+".c") != "" {
-		t.Error("expected empty for invalid JSON payload")
-	}
-}
-
-func TestExtractSubFromJWT_MissingSub(t *testing.T) {
-	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"email":"test@test.com"}`))
-	if extractSubFromJWT("a."+payload+".c") != "" {
-		t.Error("expected empty when sub claim missing")
-	}
-}
-
 func TestIsAllowedIP_EmptyAllowlist(t *testing.T) {
 	a := &App{AllowedIPs: map[string]bool{}}
-	if !a.isAllowedIP("1.2.3.4") {
-		t.Error("empty allowlist should allow all IPs")
+	if a.isAllowedIP("1.2.3.4") {
+		t.Error("empty allowlist should block all IPs (fail-closed)")
 	}
 }
 
@@ -901,9 +869,8 @@ func TestHandler_BankExchangeToken_ProviderError(t *testing.T) {
 
 func TestHandler_BankAccounts_Success(t *testing.T) {
 	a := newTestApp()
-	req := makeAuthRequest("GET /bank/accounts", "")
-	req.QueryStringParameters = map[string]string{"access_token": testEncryptToken("tok"), "provider": "teller"}
-	resp, _ := a.Handler(context.Background(), req)
+	body := fmt.Sprintf(`{"encrypted_access_token":"%s","provider":"teller"}`, testEncryptToken("tok"))
+	resp, _ := a.Handler(context.Background(), makeAuthRequest("POST /bank/accounts", body))
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected 200, got %d: %s", resp.StatusCode, resp.Body)
 	}
@@ -911,9 +878,8 @@ func TestHandler_BankAccounts_Success(t *testing.T) {
 
 func TestHandler_BankAccounts_UnknownProvider(t *testing.T) {
 	a := newTestApp()
-	req := makeAuthRequest("GET /bank/accounts", "")
-	req.QueryStringParameters = map[string]string{"access_token": testEncryptToken("tok"), "provider": "unknown"}
-	resp, _ := a.Handler(context.Background(), req)
+	body := fmt.Sprintf(`{"encrypted_access_token":"%s","provider":"unknown"}`, testEncryptToken("tok"))
+	resp, _ := a.Handler(context.Background(), makeAuthRequest("POST /bank/accounts", body))
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("expected 400, got %d", resp.StatusCode)
 	}
@@ -929,20 +895,18 @@ func TestHandler_BankAccounts_ProviderError(t *testing.T) {
 	})
 	a := newTestApp()
 	a.ProviderReg = reg
-	req := makeAuthRequest("GET /bank/accounts", "")
-	req.QueryStringParameters = map[string]string{"access_token": testEncryptToken("tok"), "provider": "teller"}
-	resp, _ := a.Handler(context.Background(), req)
+	body := fmt.Sprintf(`{"encrypted_access_token":"%s","provider":"teller"}`, testEncryptToken("tok"))
+	resp, _ := a.Handler(context.Background(), makeAuthRequest("POST /bank/accounts", body))
 	if resp.StatusCode != http.StatusBadGateway {
 		t.Errorf("expected 502, got %d", resp.StatusCode)
 	}
 }
 
-func TestHandler_BankAccounts_BodyParsing(t *testing.T) {
+func TestHandler_BankAccounts_InvalidBody(t *testing.T) {
 	a := newTestApp()
-	body := fmt.Sprintf(`{"encrypted_access_token":"%s","provider":"teller"}`, testEncryptToken("tok"))
-	resp, _ := a.Handler(context.Background(), makeAuthRequest("GET /bank/accounts", body))
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("expected 200, got %d: %s", resp.StatusCode, resp.Body)
+	resp, _ := a.Handler(context.Background(), makeAuthRequest("POST /bank/accounts", "bad"))
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d: %s", resp.StatusCode, resp.Body)
 	}
 }
 
@@ -1069,18 +1033,22 @@ func TestHandler_Login_CreateUserFails(t *testing.T) {
 	}
 }
 
-func TestHandler_Login_InvalidJWT_NoProfileCreation(t *testing.T) {
-	// Access token that is not a valid JWT — extractSubFromJWT returns ""
+func TestHandler_Login_GetSubFails_StillReturnsTokens(t *testing.T) {
+	// Cognito GetUser fails — login should still succeed, just skip profile creation
+	jwtToken := makeJWT("user-sub-123")
 	cognito := &mockCognito{
 		initiateAuthFn: func(ctx context.Context, params *cognitoidentityprovider.InitiateAuthInput, optFns ...func(*cognitoidentityprovider.Options)) (*cognitoidentityprovider.InitiateAuthOutput, error) {
 			return &cognitoidentityprovider.InitiateAuthOutput{
 				AuthenticationResult: &cognitotypes.AuthenticationResultType{
-					AccessToken:  aws.String("not-a-jwt"),
+					AccessToken:  aws.String(jwtToken),
 					IdToken:      aws.String("id-tok"),
 					RefreshToken: aws.String("refresh-tok"),
 					ExpiresIn:    3600,
 				},
 			}, nil
+		},
+		getUserFn: func(ctx context.Context, params *cognitoidentityprovider.GetUserInput, optFns ...func(*cognitoidentityprovider.Options)) (*cognitoidentityprovider.GetUserOutput, error) {
+			return nil, fmt.Errorf("cognito unavailable")
 		},
 	}
 	a := newTestAppWithMocks(cognito, &mockDynamo{})
@@ -1091,8 +1059,9 @@ func TestHandler_Login_InvalidJWT_NoProfileCreation(t *testing.T) {
 	}
 }
 
-func TestHandler_Login_GetUserError_StillCreates(t *testing.T) {
+func TestHandler_Login_DynamoGetUserError_SkipsCreate(t *testing.T) {
 	jwtToken := makeJWT("user-sub-123")
+	var createCalled bool
 	cognito := &mockCognito{
 		initiateAuthFn: func(ctx context.Context, params *cognitoidentityprovider.InitiateAuthInput, optFns ...func(*cognitoidentityprovider.Options)) (*cognitoidentityprovider.InitiateAuthOutput, error) {
 			return &cognitoidentityprovider.InitiateAuthOutput{
@@ -1107,9 +1076,10 @@ func TestHandler_Login_GetUserError_StillCreates(t *testing.T) {
 	}
 	dynamo := &mockDynamo{
 		getItemFn: func(ctx context.Context, params *dynamodb.GetItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
-			return nil, fmt.Errorf("dynamo error") // GetUser fails, returns (nil, err)
+			return nil, fmt.Errorf("dynamo error")
 		},
 		putItemFn: func(ctx context.Context, params *dynamodb.PutItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error) {
+			createCalled = true
 			return &dynamodb.PutItemOutput{}, nil
 		},
 	}
@@ -1118,6 +1088,9 @@ func TestHandler_Login_GetUserError_StillCreates(t *testing.T) {
 	resp, _ := a.Handler(context.Background(), makePublicRequest("POST /auth/login", body))
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+	if createCalled {
+		t.Error("CreateUser should NOT be called when GetUser returns an error")
 	}
 }
 
@@ -1146,9 +1119,8 @@ func TestHandler_BankAccounts_KMSDecryptError(t *testing.T) {
 			return nil, fmt.Errorf("access denied")
 		},
 	}, "test-key")
-	req := makeAuthRequest("GET /bank/accounts", "")
-	req.QueryStringParameters = map[string]string{"access_token": testEncryptToken("tok"), "provider": "teller"}
-	resp, _ := a.Handler(context.Background(), req)
+	body := fmt.Sprintf(`{"encrypted_access_token":"%s","provider":"teller"}`, testEncryptToken("tok"))
+	resp, _ := a.Handler(context.Background(), makeAuthRequest("POST /bank/accounts", body))
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("expected 400 on KMS decrypt failure, got %d: %s", resp.StatusCode, resp.Body)
 	}

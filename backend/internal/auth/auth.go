@@ -15,6 +15,7 @@ type CognitoClient interface {
 	SignUp(ctx context.Context, params *cognitoidentityprovider.SignUpInput, optFns ...func(*cognitoidentityprovider.Options)) (*cognitoidentityprovider.SignUpOutput, error)
 	InitiateAuth(ctx context.Context, params *cognitoidentityprovider.InitiateAuthInput, optFns ...func(*cognitoidentityprovider.Options)) (*cognitoidentityprovider.InitiateAuthOutput, error)
 	DeleteUser(ctx context.Context, params *cognitoidentityprovider.DeleteUserInput, optFns ...func(*cognitoidentityprovider.Options)) (*cognitoidentityprovider.DeleteUserOutput, error)
+	GetUser(ctx context.Context, params *cognitoidentityprovider.GetUserInput, optFns ...func(*cognitoidentityprovider.Options)) (*cognitoidentityprovider.GetUserOutput, error)
 }
 
 // Service handles Cognito authentication operations.
@@ -126,6 +127,22 @@ func (s *Service) DeleteUser(ctx context.Context, accessToken string) error {
 		return fmt.Errorf("cognito delete user: %w", err)
 	}
 	return nil
+}
+
+// GetSubFromAccessToken calls Cognito GetUser to extract the sub claim
+// with full server-side token validation (signature + expiry).
+func (s *Service) GetSubFromAccessToken(ctx context.Context, accessToken string) (string, error) {
+	result, err := s.client.GetUser(ctx, &cognitoidentityprovider.GetUserInput{
+		AccessToken: aws.String(accessToken),
+	})
+	if err != nil {
+		return "", fmt.Errorf("cognito get user: %w", err)
+	}
+	if result.Username == nil || *result.Username == "" {
+		return "", fmt.Errorf("cognito get user: empty username")
+	}
+	// Cognito returns the sub as Username for USER_PASSWORD_AUTH flow
+	return *result.Username, nil
 }
 
 // ExtractUserID extracts the user ID (sub) from the API Gateway request context.

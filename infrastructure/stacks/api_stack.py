@@ -199,7 +199,7 @@ class ApiStack(Stack):
             ("GetUserUsage", "GET /user/usage"),
             ("PostBankEnroll", "POST /bank/enroll"),
             ("PostBankExchangeToken", "POST /bank/exchange-token"),
-            ("GetBankAccounts", "GET /bank/accounts"),
+            ("PostBankAccounts", "POST /bank/accounts"),
             ("PostBankSyncTransactions", "POST /bank/sync-transactions"),
             ("GetBankProviders", "GET /bank/providers"),
         ]
