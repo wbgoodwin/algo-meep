@@ -13,6 +13,7 @@ import (
 // CognitoClient defines the subset of Cognito operations used by the auth service.
 type CognitoClient interface {
 	SignUp(ctx context.Context, params *cognitoidentityprovider.SignUpInput, optFns ...func(*cognitoidentityprovider.Options)) (*cognitoidentityprovider.SignUpOutput, error)
+	ConfirmSignUp(ctx context.Context, params *cognitoidentityprovider.ConfirmSignUpInput, optFns ...func(*cognitoidentityprovider.Options)) (*cognitoidentityprovider.ConfirmSignUpOutput, error)
 	InitiateAuth(ctx context.Context, params *cognitoidentityprovider.InitiateAuthInput, optFns ...func(*cognitoidentityprovider.Options)) (*cognitoidentityprovider.InitiateAuthOutput, error)
 	DeleteUser(ctx context.Context, params *cognitoidentityprovider.DeleteUserInput, optFns ...func(*cognitoidentityprovider.Options)) (*cognitoidentityprovider.DeleteUserOutput, error)
 	GetUser(ctx context.Context, params *cognitoidentityprovider.GetUserInput, optFns ...func(*cognitoidentityprovider.Options)) (*cognitoidentityprovider.GetUserOutput, error)
@@ -63,6 +64,19 @@ func (s *Service) Register(ctx context.Context, email, password string) error {
 	})
 	if err != nil {
 		return fmt.Errorf("cognito sign up: %w", err)
+	}
+	return nil
+}
+
+// ConfirmSignUp verifies the email code sent after registration.
+func (s *Service) ConfirmSignUp(ctx context.Context, email, code string) error {
+	_, err := s.client.ConfirmSignUp(ctx, &cognitoidentityprovider.ConfirmSignUpInput{
+		ClientId:         aws.String(s.clientID),
+		Username:         aws.String(email),
+		ConfirmationCode: aws.String(code),
+	})
+	if err != nil {
+		return fmt.Errorf("cognito confirm sign up: %w", err)
 	}
 	return nil
 }

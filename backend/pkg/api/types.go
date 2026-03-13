@@ -38,6 +38,11 @@ type RefreshRequest struct {
 	RefreshToken string `json:"refresh_token"`
 }
 
+type ConfirmRequest struct {
+	Email string `json:"email"`
+	Code  string `json:"code"`
+}
+
 type AuthTokens struct {
 	AccessToken  string `json:"access_token"`
 	IDToken      string `json:"id_token"`

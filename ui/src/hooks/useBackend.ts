@@ -47,12 +47,16 @@ export function useAuth() {
     return invoke<string>('register', { email, password });
   }, []);
 
+  const confirmSignup = useCallback(async (email: string, code: string) => {
+    return invoke<void>('confirm_signup', { email, code });
+  }, []);
+
   const logout = useCallback(async () => {
     await invoke<void>('logout');
     setAuthenticated(false);
   }, []);
 
-  return { authenticated, login, register, logout };
+  return { authenticated, login, register, confirmSignup, logout };
 }
 
 // --- Bank ---

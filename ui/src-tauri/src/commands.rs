@@ -126,6 +126,15 @@ pub async fn register(
 }
 
 #[tauri::command]
+pub async fn confirm_signup(
+    email: String,
+    code: String,
+    api: State<'_, ApiClient>,
+) -> Result<(), String> {
+    api.confirm_signup(&email, &code).await
+}
+
+#[tauri::command]
 pub async fn login(
     email: String,
     password: String,

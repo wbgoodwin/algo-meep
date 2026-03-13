@@ -155,6 +155,8 @@ func (a *App) Handler(ctx context.Context, req events.APIGatewayV2HTTPRequest) (
 		statusCode, body = a.handleHealth()
 	case "POST /auth/register":
 		statusCode, body = a.handleRegister(ctx, req)
+	case "POST /auth/confirm":
+		statusCode, body = a.handleConfirm(ctx, req)
 	case "POST /auth/login":
 		statusCode, body = a.handleLogin(ctx, req)
 	case "POST /auth/refresh":
@@ -267,6 +269,30 @@ func (a *App) handleRegister(ctx context.Context, req events.APIGatewayV2HTTPReq
 
 	resp, _ := api.SuccessJSON(map[string]string{"message": "user registered, check email for verification"})
 	return http.StatusCreated, resp
+}
+
+func (a *App) handleConfirm(ctx context.Context, req events.APIGatewayV2HTTPRequest) (int, []byte) {
+	var input api.ConfirmRequest
+	if err := json.Unmarshal([]byte(req.Body), &input); err != nil {
+		return api.NewBadRequest("invalid request body").ToAPIResponse()
+	}
+	if input.Email == "" || input.Code == "" {
+		return api.NewBadRequest("email and code are required").ToAPIResponse()
+	}
+
+	if err := a.AuthService.ConfirmSignUp(ctx, input.Email, input.Code); err != nil {
+		a.Log.Error("Confirm sign up failed", err, middleware.WithField("email_domain", emailDomain(input.Email)))
+		if strings.Contains(err.Error(), "CodeMismatchException") {
+			return api.NewBadRequest("incorrect verification code").ToAPIResponse()
+		}
+		if strings.Contains(err.Error(), "ExpiredCodeException") {
+			return api.NewBadRequest("verification code has expired, please register again").ToAPIResponse()
+		}
+		return api.NewInternal("confirmation failed", err).ToAPIResponse()
+	}
+
+	resp, _ := api.SuccessJSON(map[string]string{"message": "email verified, you can now sign in"})
+	return http.StatusOK, resp
 }
 
 func (a *App) handleLogin(ctx context.Context, req events.APIGatewayV2HTTPRequest) (int, []byte) {

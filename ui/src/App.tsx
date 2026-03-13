@@ -11,7 +11,7 @@ import './App.css';
 
 function App() {
   const [activePage, setActivePage] = useState<Page>('dashboard');
-  const { authenticated, login, register, logout } = useAuth();
+  const { authenticated, login, register, confirmSignup, logout } = useAuth();
 
   // True while we check if an API URL is configured
   const [apiUrlChecked, setApiUrlChecked] = useState(false);
@@ -64,7 +64,7 @@ function App() {
 
   // Not authenticated → show login/register
   if (!authenticated) {
-    return <AuthScreen onLogin={login} onRegister={register} />;
+    return <AuthScreen onLogin={login} onRegister={register} onConfirm={confirmSignup} />;
   }
 
   const renderPage = () => {

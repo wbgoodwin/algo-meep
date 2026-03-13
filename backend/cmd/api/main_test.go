@@ -48,6 +48,10 @@ func (m *mockCognito) SignUp(ctx context.Context, params *cognitoidentityprovide
 	return &cognitoidentityprovider.SignUpOutput{}, nil
 }
 
+func (m *mockCognito) ConfirmSignUp(ctx context.Context, params *cognitoidentityprovider.ConfirmSignUpInput, optFns ...func(*cognitoidentityprovider.Options)) (*cognitoidentityprovider.ConfirmSignUpOutput, error) {
+	return &cognitoidentityprovider.ConfirmSignUpOutput{}, nil
+}
+
 func (m *mockCognito) InitiateAuth(ctx context.Context, params *cognitoidentityprovider.InitiateAuthInput, optFns ...func(*cognitoidentityprovider.Options)) (*cognitoidentityprovider.InitiateAuthOutput, error) {
 	if m.initiateAuthFn != nil {
 		return m.initiateAuthFn(ctx, params, optFns...)

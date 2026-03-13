@@ -64,6 +64,12 @@ struct RegisterRequest<'a> {
 }
 
 #[derive(Serialize)]
+struct ConfirmRequest<'a> {
+    email: &'a str,
+    code: &'a str,
+}
+
+#[derive(Serialize)]
 struct RefreshRequest<'a> {
     refresh_token: &'a str,
 }
@@ -277,6 +283,33 @@ impl ApiClient {
         }
 
         Ok("Registration successful. Check your email for verification.".to_string())
+    }
+
+    pub async fn confirm_signup(&self, email: &str, code: &str) -> Result<(), String> {
+        let url = self.url("/auth/confirm")?;
+        let req = ConfirmRequest { email, code };
+
+        let resp = self
+            .http
+            .post(&url)
+            .json(&req)
+            .send()
+            .await
+            .map_err(|e| format!("Request failed: {}", e))?;
+
+        let envelope: ApiResponse<serde_json::Value> = resp
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+        if !envelope.success {
+            return Err(envelope
+                .error
+                .map(|e| e.message)
+                .unwrap_or_else(|| "Confirmation failed".to_string()));
+        }
+
+        Ok(())
     }
 
     pub async fn login(&self, email: &str, password: &str) -> Result<AuthTokens, String> {

@@ -27,6 +27,7 @@ pub fn run() {
             commands::set_api_url,
             // Auth
             commands::register,
+            commands::confirm_signup,
             commands::login,
             commands::logout,
             commands::check_auth,

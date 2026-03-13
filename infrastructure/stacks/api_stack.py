@@ -109,6 +109,7 @@ class ApiStack(Stack):
                             effect=iam.Effect.ALLOW,
                             actions=[
                                 "cognito-idp:SignUp",
+                                "cognito-idp:ConfirmSignUp",
                                 "cognito-idp:InitiateAuth",
                                 "cognito-idp:GetUser",
                                 "cognito-idp:DeleteUser",
@@ -137,7 +138,7 @@ class ApiStack(Stack):
                 "COGNITO_CLIENT_ID": user_pool_client.user_pool_client_id,
                 "TELLER_ENV": "sandbox",
                 "KMS_KEY_ARN": token_encryption_key_arn,
-                "ALLOWED_IPS": "141.152.50.56",  # IP allowlist (comma-separated)
+                "ALLOWED_IPS": "96.253.108.64",  # IP allowlist (comma-separated)
                 "SYNC_BUCKET": sync_bucket_name,
                 # TELLER_API_KEY, TELLER_CERT_PEM, TELLER_KEY_PEM loaded from SSM at runtime
             },
@@ -182,6 +183,7 @@ class ApiStack(Stack):
         public_routes = [
             ("GetHealth", "GET /health"),
             ("PostAuthRegister", "POST /auth/register"),
+            ("PostAuthConfirm", "POST /auth/confirm"),
             ("PostAuthLogin", "POST /auth/login"),
             ("PostAuthRefresh", "POST /auth/refresh"),
         ]
