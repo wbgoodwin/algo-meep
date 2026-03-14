@@ -774,10 +774,10 @@ func initTellerProvider(ctx context.Context, cfg aws.Config, reg *provider.Regis
 		return fmt.Errorf("invalid SSM parameters: %v", invalid)
 	}
 
+	// Teller uses the same API endpoint for both sandbox and production.
+	// Sandbox vs prod is determined by the credentials, not the URL.
 	baseURL := "https://api.teller.io"
-	if tellerEnv == "sandbox" {
-		baseURL = "https://api.sandbox.teller.io"
-	}
+	_ = tellerEnv
 
 	tp, err := provider.NewTellerProvider(provider.TellerConfig{
 		APIKey:        params["/algoflow/teller/api_key"],

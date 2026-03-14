@@ -136,7 +136,7 @@ class ApiStack(Stack):
             environment={
                 "COGNITO_USER_POOL_ID": user_pool.user_pool_id,
                 "COGNITO_CLIENT_ID": user_pool_client.user_pool_client_id,
-                "TELLER_ENV": "sandbox",
+                "TELLER_ENV": "development",
                 "KMS_KEY_ARN": token_encryption_key_arn,
                 "ALLOWED_IPS": "96.253.108.64",  # IP allowlist (comma-separated)
                 "SYNC_BUCKET": sync_bucket_name,
