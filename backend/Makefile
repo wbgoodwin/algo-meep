@@ -34,9 +34,11 @@ test-cover-html: test-cover
 tidy:
 	go mod tidy
 
-# Zip for deployment (matches existing CodePipeline pattern)
+# Zip for deployment — builds binary, zips it, and copies to CDK artifact location
 zip: build
-	cd build/api && zip -j ../../build/api-bootstrap.zip bootstrap
+	cd build/api && zip -j bootstrap.zip bootstrap
+	mkdir -p ../infrastructure/cdk.out
+	cp build/api/bootstrap.zip ../infrastructure/cdk.out/api-bootstrap.zip
 
 # Local development — run the handler locally (requires SAM CLI or similar)
 local:
