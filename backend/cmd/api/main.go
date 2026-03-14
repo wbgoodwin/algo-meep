@@ -12,8 +12,10 @@ import (
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/kms"
+	"github.com/aws/aws-sdk-go-v2/service/ssm"
 
 	"github.com/wbgoodwin/algo-meep/backend/internal/auth"
 	"github.com/wbgoodwin/algo-meep/backend/internal/crypto"
@@ -65,29 +67,10 @@ func init() {
 	// Provider registry
 	providerReg := provider.NewRegistry()
 
-	// Initialize Teller provider if configured
-	tellerAPIKey := os.Getenv("TELLER_API_KEY")
-	tellerCert := os.Getenv("TELLER_CERT_PEM")
-	tellerKey := os.Getenv("TELLER_KEY_PEM")
+	// Load Teller credentials from SSM and initialize the provider
 	tellerEnv := os.Getenv("TELLER_ENV")
-
-	if tellerAPIKey != "" {
-		baseURL := "https://api.teller.io"
-		if tellerEnv == "sandbox" {
-			baseURL = "https://api.sandbox.teller.io"
-		}
-		tp, err := provider.NewTellerProvider(provider.TellerConfig{
-			APIKey:  tellerAPIKey,
-			CertPEM: []byte(tellerCert),
-			KeyPEM:  []byte(tellerKey),
-			BaseURL: baseURL,
-		})
-		if err != nil {
-			logger.Error("Failed to initialize Teller provider", err)
-		} else {
-			providerReg.Register(tp)
-			logger.Info("Teller provider initialized")
-		}
+	if err := initTellerProvider(context.Background(), awsCfg, providerReg, tellerEnv, logger); err != nil {
+		logger.Error("Failed to initialize Teller provider", err)
 	}
 
 	// Token encryption (KMS)
@@ -746,6 +729,70 @@ func (a *App) isAllowedIP(ip string) bool {
 		return false
 	}
 	return a.AllowedIPs[ip]
+}
+
+// initTellerProvider fetches Teller credentials from SSM and registers the provider.
+func initTellerProvider(ctx context.Context, cfg aws.Config, reg *provider.Registry, tellerEnv string, logger *middleware.Logger) error {
+	ssmClient := ssm.NewFromConfig(cfg)
+
+	names := []string{
+		"/algoflow/teller/api_key",
+		"/algoflow/teller/app_id",
+		"/algoflow/teller/cert_pem",
+		"/algoflow/teller/private_key_pem",
+	}
+	withDecryption := true
+	out, err := ssmClient.GetParameters(ctx, &ssm.GetParametersInput{
+		Names:          names,
+		WithDecryption: &withDecryption,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to fetch Teller SSM parameters: %w", err)
+	}
+
+	params := make(map[string]string, len(out.Parameters))
+	for _, p := range out.Parameters {
+		params[*p.Name] = *p.Value
+	}
+
+	missing := make([]string, 0)
+	for _, name := range names {
+		if _, ok := params[name]; !ok {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("missing SSM parameters: %v", missing)
+	}
+
+	// Also check for any InvalidParameters returned by SSM
+	if len(out.InvalidParameters) > 0 {
+		invalid := make([]string, len(out.InvalidParameters))
+		for i, p := range out.InvalidParameters {
+			invalid[i] = string(p)
+		}
+		return fmt.Errorf("invalid SSM parameters: %v", invalid)
+	}
+
+	baseURL := "https://api.teller.io"
+	if tellerEnv == "sandbox" {
+		baseURL = "https://api.sandbox.teller.io"
+	}
+
+	tp, err := provider.NewTellerProvider(provider.TellerConfig{
+		APIKey:        params["/algoflow/teller/api_key"],
+		ApplicationID: params["/algoflow/teller/app_id"],
+		CertPEM:       []byte(params["/algoflow/teller/cert_pem"]),
+		KeyPEM:        []byte(params["/algoflow/teller/private_key_pem"]),
+		BaseURL:       baseURL,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create Teller provider: %w", err)
+	}
+
+	reg.Register(tp)
+	logger.Info("Teller provider initialized from SSM")
+	return nil
 }
 
 // emailDomain extracts the domain from an email for safe logging (no PII).

@@ -13,17 +13,19 @@ import (
 // Teller uses mutual TLS (client certificate) for authentication.
 // https://teller.io/docs
 type TellerProvider struct {
-	apiKey     string
-	baseURL    string
-	httpClient *http.Client
+	apiKey        string
+	applicationID string
+	baseURL       string
+	httpClient    *http.Client
 }
 
 // TellerConfig holds configuration needed to initialize TellerProvider.
 type TellerConfig struct {
-	APIKey  string
-	CertPEM []byte // Client certificate PEM bytes
-	KeyPEM  []byte // Client private key PEM bytes
-	BaseURL string // "https://api.teller.io" for prod, "https://api.teller.io/sandbox" for sandbox
+	APIKey        string
+	ApplicationID string // Teller Connect application ID (separate from API key)
+	CertPEM       []byte // Client certificate PEM bytes
+	KeyPEM        []byte // Client private key PEM bytes
+	BaseURL       string // "https://api.teller.io" for prod, "https://api.sandbox.teller.io" for sandbox
 }
 
 // NewTellerProvider creates a new Teller provider with mTLS.
@@ -43,8 +45,9 @@ func NewTellerProvider(cfg TellerConfig) (*TellerProvider, error) {
 	}
 
 	return &TellerProvider{
-		apiKey:  cfg.APIKey,
-		baseURL: baseURL,
+		apiKey:        cfg.APIKey,
+		applicationID: cfg.ApplicationID,
+		baseURL:       baseURL,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 			Transport: &http.Transport{
@@ -63,7 +66,7 @@ func (t *TellerProvider) StartEnrollment(userID string, institutionID string) (*
 	// application ID; the client opens Teller Connect in a webview.
 	// The enrollment session URL points to Teller Connect with the app ID.
 	return &EnrollmentSession{
-		SessionURL: fmt.Sprintf("https://teller.io/connect?application_id=%s&institution=%s", t.apiKey, institutionID),
+		SessionURL: fmt.Sprintf("https://teller.io/connect?application_id=%s&institution=%s", t.applicationID, institutionID),
 		SessionID:  fmt.Sprintf("teller_%s_%d", userID, time.Now().UnixMilli()),
 		Provider:   "teller",
 	}, nil
